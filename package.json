@@ -2,18 +2,24 @@
   "name": "patto-md",
   "version": "0.0.1",
   "private": true,
+  "type": "module",
   "description": "Markdown文書と添付画像を即座にWeb公開するWebサービス。",
   "scripts": {
     "dev:web": "pnpm --filter @patto-md/web dev",
     "dev:api": "pnpm --filter @patto-md/api dev",
     "build": "pnpm -r build",
     "typecheck": "pnpm -r typecheck",
+    "lint": "eslint .",
+    "lint:fix": "eslint . --fix",
     "format": "prettier --write .",
     "format:check": "prettier --check ."
   },
   "packageManager": "pnpm@10.33.0",
   "devDependencies": {
+    "eslint": "^10.13.0",
+    "eslint-plugin-astro": "^3.2.1",
     "prettier": "^3.9.10",
-    "prettier-plugin-astro": "^1.1.1"
+    "prettier-plugin-astro": "^1.1.1",
+    "typescript-eslint": "^8.72.0"
   }
 }
