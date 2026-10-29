@@ -9,7 +9,7 @@
     {
       "binding": "DB",
       "database_name": "patto-md-d1",
-      "database_id": "00000000-0000-0000-0000-000000000000",
+      "database_id": "999e0e2d-6fee-4a5d-ae55-525a57660260",
       "migrations_dir": "migrations"
     }
   ],
