@@ -1,8 +1,13 @@
 import {
   documentCommitRequestSchema,
+  type AttachmentRecord,
   type DocumentCommitResponse,
+  type DocumentRecord,
+  type DocumentResponse,
+  SLUG_PATTERN,
 } from '@patto-md/shared';
 import { Hono } from 'hono';
+import { calculateDocumentCacheControl } from '../lib/cache';
 import { calculateExpiresAt } from '../lib/date';
 import { generateSlug } from '../lib/slug';
 import type { AppEnv } from '../types';
@@ -243,4 +248,160 @@ documentsRouter.post('/', async (c) => {
   };
 
   return c.json(responsePayload, 201);
+});
+
+/**
+ * ドキュメント詳細取得およびコンテンツ配信エンドポイント。
+ *
+ * 指定されたSlugに基づき、D1からメタデータを取得してオンデマンドで有効期限を判定する。
+ * 有効なドキュメントであれば、R2からMarkdown本文実体を取得し、残存有効期限に応じた
+ * Cache-Controlヘッダーを付与して返却する。
+ */
+documentsRouter.get('/:id', async (c) => {
+  const id = c.req.param('id');
+
+  // Slug形式の事前検証(不正リクエストによるD1クォータ消費を防止)。
+  if (!id || !SLUG_PATTERN.test(id)) {
+    c.header('Cache-Control', 'no-store');
+    return c.json(
+      {
+        error: {
+          message: 'ドキュメントが見つかりません。',
+        },
+      },
+      404,
+    );
+  }
+
+  const now = new Date();
+  const nowIso = now.toISOString();
+
+  // D1からのメタデータ取得およびオンデマンド有効期限判定(遅延評価)。
+  let doc: DocumentRecord | null = null;
+  try {
+    doc = await c.env.DB.prepare(
+      `SELECT
+        id,
+        title,
+        content_r2_key,
+        status,
+        expires_at,
+        created_at,
+        updated_at
+      FROM documents
+      WHERE id = ?
+        AND status = 'published'
+        AND (expires_at IS NULL OR expires_at > ?)
+      LIMIT 1`,
+    )
+      .bind(id, nowIso)
+      .first<DocumentRecord>();
+  } catch (error) {
+    console.error('D1ドキュメントメタデータ取得エラー:', error);
+    return c.json(
+      {
+        error: {
+          message: 'データベースの参照に失敗しました。',
+        },
+      },
+      500,
+    );
+  }
+
+  // レコードが存在しない、または期限切れの場合は404を返却する。
+  if (!doc) {
+    c.header('Cache-Control', 'no-store');
+    return c.json(
+      {
+        error: {
+          message: 'ドキュメントが見つかりません。',
+        },
+      },
+      404,
+    );
+  }
+
+  // 紐づく添付ファイル一覧の取得。
+  let attachments: AttachmentRecord[] = [];
+  try {
+    const attachmentResults = await c.env.DB.prepare(
+      `SELECT
+        id,
+        document_id,
+        file_name,
+        file_size,
+        mime_type,
+        r2_key,
+        created_at
+      FROM attachments
+      WHERE document_id = ?
+      ORDER BY created_at ASC`,
+    )
+      .bind(id)
+      .all<AttachmentRecord>();
+
+    attachments = attachmentResults.results ?? [];
+  } catch (error) {
+    console.error('D1添付ファイル情報取得エラー:', error);
+    return c.json(
+      {
+        error: {
+          message: '添付ファイルの参照に失敗しました。',
+        },
+      },
+      500,
+    );
+  }
+
+  // R2からのMarkdown本文実体取得。
+  let content = '';
+  try {
+    const object = await c.env.BUCKET.get(doc.content_r2_key);
+    if (!object) {
+      console.error(`R2オブジェクト欠落エラー: ${doc.content_r2_key}`);
+      return c.json(
+        {
+          error: {
+            message: 'ドキュメント本文が見つかりません。',
+          },
+        },
+        500,
+      );
+    }
+    content = await object.text();
+  } catch (error) {
+    console.error('R2ドキュメント本文読み込みエラー:', error);
+    return c.json(
+      {
+        error: {
+          message: 'ドキュメント本文の読み込みに失敗しました。',
+        },
+      },
+      500,
+    );
+  }
+
+  // 残存有効期間に基づくCache-Controlヘッダーの付与。
+  const cacheControl = calculateDocumentCacheControl(doc.expires_at, now);
+  c.header('Cache-Control', cacheControl);
+
+  // レスポンスの構築(スネークケースからキャメルケースへの変換)。
+  const responsePayload: DocumentResponse = {
+    id: doc.id,
+    title: doc.title,
+    content,
+    status: doc.status,
+    expiresAt: doc.expires_at,
+    createdAt: doc.created_at,
+    updatedAt: doc.updated_at,
+    attachments: attachments.map((attachment) => ({
+      id: attachment.id,
+      fileName: attachment.file_name,
+      fileSize: attachment.file_size,
+      mimeType: attachment.mime_type,
+      r2Key: attachment.r2_key,
+    })),
+  };
+
+  return c.json(responsePayload, 200);
 });
