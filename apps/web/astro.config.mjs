@@ -13,5 +13,10 @@ export default defineConfig({
   integrations: [react()],
   vite: {
     plugins: [tailwindcss()],
+    resolve: {
+      alias: {
+        'react-dom/server': 'react-dom/server.edge',
+      },
+    },
   },
 });

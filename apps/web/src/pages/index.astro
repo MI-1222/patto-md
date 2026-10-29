@@ -1,24 +1,65 @@
 ---
 /**
- * 全ページ共通の基本レイアウトコンポーネント。
+ * トップページおよびドキュメント作成画面。
+ * Markdownおよび画像のドラッグ&ドロップ受付を行う。
  */
-import '../styles/global.css';
-
-import { App } from '../components/App';
-
-// ページメタデータの設定。
-const pageTitle = 'patto-md';
+import BaseLayout from '../layouts/BaseLayout.astro';
+import { DropZoneContainer } from '../components/dropzone/DropZoneContainer';
 ---
 
-<!doctype html>
-<html lang="ja" class="m-0 size-full">
-  <head>
-    <meta charset="utf-8" />
-    <meta name="viewport" content="width=device-width" />
-    <meta name="generator" content={Astro.generator} />
-    <title>{pageTitle}</title>
-  </head>
-  <body class="m-0 size-full">
-    <App client:load />
-  </body>
-</html>
+<BaseLayout>
+  <div class="mx-auto max-w-4xl px-4 py-12 sm:px-6 sm:py-16">
+    {/* ヒーローセクション */}
+    <div class="mb-10 text-center sm:mb-12">
+      <div class="mb-3 inline-flex items-center gap-2 rounded-full border border-blue-500/30 bg-blue-950/30 px-3 py-1 text-xs text-blue-400">
+        <span class="size-1.5 rounded-full bg-blue-400 animate-pulse"></span>
+        <span>アカウント不要・最速Web公開</span>
+      </div>
+      <h1 class="text-3xl font-extrabold tracking-tight text-neutral-100 sm:text-5xl">
+        Markdownを、パッと共有。
+      </h1>
+      <p class="mx-auto mt-4 max-w-xl text-sm leading-relaxed text-neutral-400 sm:text-base">
+        ローカルのMarkdownファイルと添付画像をドラッグ&ドロップするだけ。
+        数秒でパーマリンクを発行し、DiscordやWebへ手軽に展開できます。
+      </p>
+    </div>
+
+    {/* ドロップゾーンアイランド */}
+    <div class="mb-16">
+      <DropZoneContainer client:load />
+    </div>
+
+    {/* 3ステップガイド */}
+    <div class="grid grid-cols-1 gap-6 border-t border-neutral-800/80 pt-12 sm:grid-cols-3">
+      <div class="rounded-xl border border-neutral-800/60 bg-neutral-900/20 p-5">
+        <span class="font-mono text-xs font-bold text-blue-400">01</span>
+        <h3 class="mt-2 text-sm font-semibold text-neutral-200">
+          D&Dでまとめて投入
+        </h3>
+        <p class="mt-1.5 text-xs leading-relaxed text-neutral-400">
+          Markdownファイルと参照画像(またはフォルダ)を一緒にブラウザへドロップします。
+        </p>
+      </div>
+
+      <div class="rounded-xl border border-neutral-800/60 bg-neutral-900/20 p-5">
+        <span class="font-mono text-xs font-bold text-blue-400">02</span>
+        <h3 class="mt-2 text-sm font-semibold text-neutral-200">
+          ブラウザ上でパス解決
+        </h3>
+        <p class="mt-1.5 text-xs leading-relaxed text-neutral-400">
+          ローカル相対パスと画像を照合し、ストレージへダイレクトに安全送信します。
+        </p>
+      </div>
+
+      <div class="rounded-xl border border-neutral-800/60 bg-neutral-900/20 p-5">
+        <span class="font-mono text-xs font-bold text-blue-400">03</span>
+        <h3 class="mt-2 text-sm font-semibold text-neutral-200">
+          即座にURLを共有
+        </h3>
+        <p class="mt-1.5 text-xs leading-relaxed text-neutral-400">
+          発行されたパーマリンクで、GFM対応の美しいドキュメントを誰でも閲覧できます。
+        </p>
+      </div>
+    </div>
+  </div>
+</BaseLayout>

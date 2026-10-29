@@ -4,9 +4,9 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "dev": "astro dev",
-    "build": "astro build",
-    "preview": "astro preview",
+    "dev": "ASTRO_TELEMETRY_DISABLED=1 astro dev",
+    "build": "ASTRO_TELEMETRY_DISABLED=1 astro build",
+    "preview": "wrangler pages dev dist --compatibility-date=2025-02-24 --compatibility-flags=nodejs_compat",
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
@@ -22,6 +22,7 @@
   "devDependencies": {
     "@types/react": "^19.0.10",
     "@types/react-dom": "^19.0.4",
-    "typescript": "^5.7.3"
+    "typescript": "^5.7.3",
+    "wrangler": "^3.114.17"
   }
 }

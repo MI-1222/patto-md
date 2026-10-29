@@ -1,0 +1,24 @@
+---
+/**
+ * 全画面共通フッターコンポーネント。
+ */
+interface Props {
+  className?: string;
+}
+
+const { className = '' } = Astro.props;
+---
+
+<footer
+  class:list={`border-t border-neutral-800/80 bg-neutral-950 py-8 text-neutral-500 ${className}`}
+>
+  <div class="mx-auto flex max-w-5xl flex-col items-center justify-between gap-4 px-4 text-xs sm:flex-row sm:px-6">
+    <div class="flex flex-col items-center gap-1 sm:items-start">
+      <p class="font-medium text-neutral-400">patto-md</p>
+    </div>
+
+    <div class="flex items-center gap-6">
+      <span class="text-neutral-600">&copy; 2026 MI-1222</span>
+    </div>
+  </div>
+</footer>

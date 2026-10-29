@@ -1,0 +1,38 @@
+---
+/**
+ * ドキュメント閲覧画面のエントリーポイント。
+ * URLパラメータからドキュメントIDを取得し、表示画面を提供する。
+ */
+import BaseLayout from '../../layouts/BaseLayout.astro';
+import { SLUG_PATTERN } from '@patto-md/shared';
+
+const { id } = Astro.params;
+
+// Slug形式の事前検証。不正な形式の場合は404ページへリダイレクトする。
+if (!id || !SLUG_PATTERN.test(id)) {
+  return Astro.redirect('/404');
+}
+---
+
+<BaseLayout
+  title={`ドキュメント (${id}) - patto-md`}
+  description="patto-mdで共有されたMarkdownドキュメント。"
+>
+  <div class="mx-auto max-w-4xl px-4 py-12 sm:px-6">
+    <div class="rounded-xl border border-neutral-800 bg-neutral-900/50 p-6 sm:p-8">
+      <div class="mb-4 flex items-center justify-between border-b border-neutral-800 pb-4">
+        <div>
+          <span class="font-mono text-xs text-neutral-500">
+            Document ID: {id}
+          </span>
+          <h1 class="mt-1 text-xl font-bold text-neutral-200">
+            ドキュメント閲覧画面の準備中
+          </h1>
+        </div>
+      </div>
+      <p class="text-sm text-neutral-400">
+        閲覧画面の実装は後続のステップで提供されます。
+      </p>
+    </div>
+  </div>
+</BaseLayout>

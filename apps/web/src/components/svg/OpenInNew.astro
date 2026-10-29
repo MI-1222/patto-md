@@ -1,0 +1,53 @@
+---
+import type { HTMLAttributes } from 'astro/types';
+
+/**
+ * 外部リンクや別タブ展開を表すオープンアイコンコンポーネント。
+ * Google Material Symbols の open_in_new を採用し、枠と矢印を2つのパスに分割。
+ * インタラクティブ時は矢印パーツのみが右上へ微小スライドする。
+ */
+interface Props extends HTMLAttributes<'svg'> {
+  /** 追加のCSSクラス名。 */
+  class?: string;
+  /** 親要素またはアイコンホバー時に矢印パーツを右上へ移動させるかどうか。 */
+  interactive?: boolean;
+  /** アクセシビリティ用のラベル。 */
+  ariaLabel?: string;
+  /** 装飾用アイコンとして支援技術から隠すかどうか(デフォルト: true)。 */
+  ariaHidden?: boolean;
+}
+
+const {
+  class: className,
+  interactive = false,
+  ariaLabel,
+  ariaHidden = true,
+  ...rest
+} = Astro.props;
+---
+
+<svg
+  xmlns="http://www.w3.org/2000/svg"
+  viewBox="0 -960 960 960"
+  fill="currentColor"
+  focusable="false"
+  class:list={['inline-block shrink-0', className]}
+  aria-label={ariaLabel}
+  aria-hidden={ariaHidden ? 'true' : undefined}
+  {...rest}
+>
+  {/* ウィンドウ枠(静的) */}
+  <path d="M180-120q-24 0-42-18t-18-42v-600q0-24 18-42t42-18h279v60H180v600h600v-279h60v279q0 24-18 42t-42 18H180Z" />
+  {/* 右上の矢印パーツ(ホバー時に右上へ微小スライド) */}
+  <path
+    d="M382-339l-42-43 398-398H519v-60h321v321h-60v-218L382-339Z"
+    class:list={[
+      'transition-transform duration-200 ease-out motion-reduce:transform-none',
+      interactive && [
+        'group-hover:translate-x-30 group-hover:-translate-y-30',
+        'group-hover/link:translate-x-30 group-hover/link:-translate-y-30',
+        'hover:translate-x-30 hover:-translate-y-30',
+      ],
+    ]}
+  />
+</svg>

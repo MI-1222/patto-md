@@ -1,0 +1,33 @@
+---
+/**
+ * 404 Not Found エラーページ。
+ * 存在しないドキュメントまたは有効期限が切れたドキュメントへのアクセス時に表示する。
+ */
+import BaseLayout from '../layouts/BaseLayout.astro';
+---
+
+<BaseLayout
+  title="ページが見つかりません - patto-md"
+  description="指定されたドキュメントは存在しないか、有効期限が切れています。"
+>
+  <div class="mx-auto flex max-w-3xl flex-col items-center justify-center px-4 py-24 text-center sm:px-6">
+    <div class="mb-6 flex size-16 items-center justify-center rounded-2xl border border-neutral-800 bg-neutral-900/80 shadow-inner">
+      <span class="font-mono text-2xl font-bold text-neutral-400">404</span>
+    </div>
+
+    <h1 class="mb-3 text-2xl font-bold tracking-tight text-neutral-100 sm:text-3xl">
+      ドキュメントが見つかりません
+    </h1>
+
+    <p class="mb-8 max-w-md text-sm text-neutral-400">
+      指定されたURLのドキュメントは存在しないか、設定された有効期限を経過したため削除されました。
+    </p>
+
+    <a
+      href="/"
+      class="inline-flex items-center gap-2 rounded-lg bg-neutral-100 px-4 py-2.5 text-sm font-medium text-neutral-900 transition-colors hover:bg-neutral-200"
+    >
+      トップページへ戻る
+    </a>
+  </div>
+</BaseLayout>
