@@ -2,6 +2,7 @@ import { SHARED_MODULE_NAME } from '@patto-md/shared';
 import { Hono } from 'hono';
 import { cors } from 'hono/cors';
 import { logger } from 'hono/logger';
+import { documentsRouter } from './routes/documents';
 import { uploadRouter } from './routes/upload';
 import type { AppEnv } from './types';
 
@@ -75,5 +76,8 @@ app.get('/api/health', (c) => {
 
 /** ファイルアップロード関連APIサブルーターのマウント。 */
 app.route('/api/upload', uploadRouter);
+
+/** ドキュメント関連APIサブルーターのマウント。 */
+app.route('/api/documents', documentsRouter);
 
 export default app;
