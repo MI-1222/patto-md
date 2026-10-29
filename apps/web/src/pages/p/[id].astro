@@ -8,7 +8,7 @@
 /* eslint-disable astro/no-set-html-directive */
 import BaseLayout from '../../layouts/BaseLayout.astro';
 import { SLUG_PATTERN } from '@patto-md/shared';
-import { fetchDocument, getApiBaseUrl } from '../../lib/api';
+import { fetchDocument } from '../../lib/api';
 import { renderMarkdown, extractDescription } from '../../lib/markdown';
 import { DocumentActionBar } from '../../components/viewer';
 
@@ -18,10 +18,20 @@ if (!id || !SLUG_PATTERN.test(id)) {
   return Astro.redirect('/404');
 }
 
+/** Cloudflare Workers ランタイム環境変数またはビルド時環境変数からAPIベースURLを解決する。 */
+const runtimeEnv = (
+  Astro.locals as { runtime?: { env?: { PUBLIC_API_URL?: string } } }
+)?.runtime?.env;
+const apiBaseUrl =
+  runtimeEnv?.PUBLIC_API_URL ||
+  import.meta.env.PUBLIC_API_URL ||
+  'http://localhost:8787';
+
 let docData;
 try {
-  docData = await fetchDocument(id);
-} catch (_error) {
+  docData = await fetchDocument(id, apiBaseUrl);
+} catch (error) {
+  console.error('SSR fetchDocument エラー:', error);
   return Astro.redirect('/404');
 }
 
@@ -31,7 +41,6 @@ if (cacheControl) {
   Astro.response.headers.set('Cache-Control', cacheControl);
 }
 
-const apiBaseUrl = getApiBaseUrl();
 /** サーバーサイドでHTMLに変換されたMarkdown本文。 */
 const { html: renderedHtml } = await renderMarkdown(doc.content, {
   assetBaseUrl: apiBaseUrl,

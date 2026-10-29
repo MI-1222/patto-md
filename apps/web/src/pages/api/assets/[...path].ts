@@ -10,13 +10,19 @@ import { getApiBaseUrl } from '../../../lib/api';
  * なお、通常のHTML配信時は `renderMarkdown` により画像パスがAPIの絶対URLへ置換されるため、
  * ブラウザはAPIへ直接アクセスする。本エンドポイントはセーフティネットとして動作する。
  */
-export const GET: APIRoute = async ({ params }) => {
+export const GET: APIRoute = async ({ params, locals }) => {
   const assetPath = params.path;
   if (!assetPath) {
     return new Response('無効なアセットパス。', { status: 400 });
   }
 
-  const apiBaseUrl = getApiBaseUrl();
+  const runtimeEnv = (
+    locals as { runtime?: { env?: { PUBLIC_API_URL?: string } } }
+  )?.runtime?.env;
+  const apiBaseUrl =
+    runtimeEnv?.PUBLIC_API_URL ||
+    import.meta.env.PUBLIC_API_URL ||
+    getApiBaseUrl();
   /** バックエンドAPIのアセット取得エンドポイントURL。 */
   const targetUrl = `${apiBaseUrl}/api/assets/${assetPath}`;
 

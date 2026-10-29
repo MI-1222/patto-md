@@ -45,13 +45,6 @@ const resolvedApiUrl =
       window.__PATTO_API_URL__ = apiUrl;
     </script>}
 
-    {resolvedApiUrl && <script
-      is:inline
-      define:vars={{ apiUrl: resolvedApiUrl }}
-    >
-      window.__PATTO_API_URL__ = apiUrl;
-    </script>}
-
     <title>{title}</title>
     <meta name="description" content={description} />
 
