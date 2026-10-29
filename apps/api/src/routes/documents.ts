@@ -9,7 +9,7 @@ import {
 import { Hono } from 'hono';
 import { calculateDocumentCacheControl } from '../lib/cache';
 import { calculateExpiresAt } from '../lib/date';
-import { isValidR2Key } from '../lib/r2';
+import { checkR2ObjectExists, getR2Text, isValidR2Key } from '../lib/r2';
 import { generateSlug } from '../lib/slug';
 import type { AppEnv } from '../types';
 
@@ -78,10 +78,21 @@ documentsRouter.post('/', async (c) => {
     }
   }
 
-  // R2上のMarkdown本文実体の存在確認。
+  const r2Creds = {
+    accountId: c.env.CLOUDFLARE_ACCOUNT_ID,
+    accessKeyId: c.env.R2_ACCESS_KEY_ID,
+    secretAccessKey: c.env.R2_SECRET_ACCESS_KEY,
+    bucketName: c.env.R2_BUCKET_NAME,
+  };
+
+  // R2上のMarkdown本文実体の存在確認(ローカル開発時S3フォールバック対応)。
   try {
-    const contentHead = await c.env.BUCKET.head(contentR2Key);
-    if (!contentHead) {
+    const contentExists = await checkR2ObjectExists(
+      c.env.BUCKET,
+      contentR2Key,
+      r2Creds,
+    );
+    if (!contentExists) {
       return c.json(
         {
           error: {
@@ -96,10 +107,14 @@ documentsRouter.post('/', async (c) => {
     if (attachments.length > 0) {
       const checkResults = await Promise.all(
         attachments.map(async (attachment) => {
-          const headResult = await c.env.BUCKET.head(attachment.r2Key);
+          const exists = await checkR2ObjectExists(
+            c.env.BUCKET,
+            attachment.r2Key,
+            r2Creds,
+          );
           return {
             fileName: attachment.fileName,
-            exists: headResult !== null,
+            exists,
           };
         }),
       );
@@ -338,11 +353,18 @@ documentsRouter.get('/:id', async (c) => {
     );
   }
 
-  // R2からのMarkdown本文実体取得。
+  // R2からのMarkdown本文実体取得(ローカル開発時S3フォールバック対応)。
+  const r2Creds = {
+    accountId: c.env.CLOUDFLARE_ACCOUNT_ID,
+    accessKeyId: c.env.R2_ACCESS_KEY_ID,
+    secretAccessKey: c.env.R2_SECRET_ACCESS_KEY,
+    bucketName: c.env.R2_BUCKET_NAME,
+  };
+
   let content = '';
   try {
-    const object = await c.env.BUCKET.get(doc.content_r2_key);
-    if (!object) {
+    const text = await getR2Text(c.env.BUCKET, doc.content_r2_key, r2Creds);
+    if (text === null) {
       console.error(`R2オブジェクト欠落エラー: ${doc.content_r2_key}`);
       return c.json(
         {
@@ -353,7 +375,7 @@ documentsRouter.get('/:id', async (c) => {
         500,
       );
     }
-    content = await object.text();
+    content = text;
   } catch (error) {
     console.error('R2ドキュメント本文読み込みエラー:', error);
     return c.json(

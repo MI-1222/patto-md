@@ -1,5 +1,5 @@
 import { Hono } from 'hono';
-import { isValidR2Key } from '../lib/r2';
+import { getR2AssetResponse, isValidR2Key } from '../lib/r2';
 import type { AppEnv } from '../types';
 
 /** アセット配信用のサブルーター。 */
@@ -26,11 +26,17 @@ assetsRouter.get('/:key{.+}', async (c) => {
     );
   }
 
-  try {
-    /** R2バケットから取得したオブジェクト。 */
-    const object = await c.env.BUCKET.get(key);
+  const r2Creds = {
+    accountId: c.env.CLOUDFLARE_ACCOUNT_ID,
+    accessKeyId: c.env.R2_ACCESS_KEY_ID,
+    secretAccessKey: c.env.R2_SECRET_ACCESS_KEY,
+    bucketName: c.env.R2_BUCKET_NAME,
+  };
 
-    if (!object) {
+  try {
+    const response = await getR2AssetResponse(c.env.BUCKET, key, r2Creds);
+
+    if (!response) {
       return c.json(
         {
           error: {
@@ -41,17 +47,7 @@ assetsRouter.get('/:key{.+}', async (c) => {
       );
     }
 
-    c.header(
-      'Content-Type',
-      object.httpMetadata?.contentType || 'application/octet-stream',
-    );
-    c.header('Cache-Control', 'public, max-age=31536000, immutable');
-
-    if (object.httpEtag) {
-      c.header('ETag', object.httpEtag);
-    }
-
-    return c.body(object.body);
+    return response;
   } catch (error) {
     console.error('R2アセット取得エラー:', error);
     return c.json(
