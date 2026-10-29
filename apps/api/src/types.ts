@@ -21,6 +21,9 @@ export interface AppBindings extends Env {
 
   /** Cloudflare アカウントID。 */
   CLOUDFLARE_ACCOUNT_ID?: string;
+
+  /** R2 バケット名(未指定時はデフォルト値を使用)。 */
+  R2_BUCKET_NAME?: string;
 }
 
 /**

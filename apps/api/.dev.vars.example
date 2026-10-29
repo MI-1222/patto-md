@@ -1,0 +1,33 @@
+# ==============================================================================
+# Cloudflare Workers API ローカル開発用環境変数。
+#
+# 利用方法:
+# 本ファイルをコピーして `apps/api/.dev.vars` を作成し、実際の値を入力して利用する。
+# `.dev.vars` は .gitignore に含まれており、ローカルの `wrangler dev` 起動時に自動適用される。
+# ==============================================================================
+
+# Cloudflare アカウントID:
+# Cloudflare ダッシュボードのurlや概要画面右側パネルに表示される32文字の英数字。
+# R2 の S3 互換エンドポイント (https://<ACCOUNT_ID>.r2.cloudflarestorage.com) の生成に使用する。
+CLOUDFLARE_ACCOUNT_ID="your-cloudflare-account-id"
+
+# R2 S3互換 アクセスキーID:
+# Cloudflare ダッシュボード「R2」→「APIトークンを管理」から作成する。
+# 権限は対象バケットに対する「オブジェクトの読み取りと書き込み」が必要。
+# Presigned PUT URL の SigV4 署名クエリ (X-Amz-Credential) の生成に使用する。
+R2_ACCESS_KEY_ID="your-r2-access-key-id"
+
+# R2 S3互換 シークレットアクセスキー:
+# 上記 API トークン作成時に一度のみ表示されるシークレット文字列。
+# SigV4 署名の HMAC-SHA256 計算に使用する。
+R2_SECRET_ACCESS_KEY="your-r2-secret-access-key"
+
+# R2 バケット名:
+# アップロード先となる Cloudflare R2 のバケット名。
+# 未指定時はデフォルト値 (patto-md-r2) が自動適用される。
+R2_BUCKET_NAME="patto-md-r2"
+
+# フロントエンド許可オリジン:
+# CORS (Cross-Origin Resource Sharing) で許可する Web アプリケーションのオリジン URL。
+# ローカル開発時は Astro の開発サーバー (http://localhost:4321) を指定する。
+FRONTEND_ORIGIN="http://localhost:4321"

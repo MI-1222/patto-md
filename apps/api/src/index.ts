@@ -2,13 +2,12 @@ import { SHARED_MODULE_NAME } from '@patto-md/shared';
 import { Hono } from 'hono';
 import { cors } from 'hono/cors';
 import { logger } from 'hono/logger';
+import { uploadRouter } from './routes/upload';
 import type { AppEnv } from './types';
 
 export * from './types';
 
-/**
- * Hono アプリケーションインスタンスの初期化。
- */
+/** Hono アプリケーションインスタンスの初期化。 */
 const app = new Hono<AppEnv>();
 
 // アクセスログ出力ミドルウェアの登録。
@@ -58,9 +57,7 @@ app.onError((error, c) => {
   );
 });
 
-/**
- * サービスヘルスチェックエンドポイント。
- */
+/** サービスヘルスチェックエンドポイント。 */
 app.get('/health', (c) => {
   return c.json({
     status: 'ok',
@@ -68,14 +65,15 @@ app.get('/health', (c) => {
   });
 });
 
-/**
- * APIルート経由のヘルスチェックエンドポイント。
- */
+/** APIルート経由のヘルスチェックエンドポイント。 */
 app.get('/api/health', (c) => {
   return c.json({
     status: 'ok',
     module: SHARED_MODULE_NAME,
   });
 });
+
+/** ファイルアップロード関連APIサブルーターのマウント。 */
+app.route('/api/upload', uploadRouter);
 
 export default app;
