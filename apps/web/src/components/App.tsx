@@ -1,4 +1,4 @@
-import { SHARED_MODULE_NAME } from "@patto-md/shared";
+import { SHARED_MODULE_NAME } from '@patto-md/shared';
 
 /**
  * アプリケーションのルートReactコンポーネント。

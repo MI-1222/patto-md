@@ -1,4 +1,4 @@
-import { SHARED_MODULE_NAME } from "@patto-md/shared";
+import { SHARED_MODULE_NAME } from '@patto-md/shared';
 
 /**
  * Cloudflare Workers API のエントリーポイント。
@@ -13,15 +13,15 @@ export default {
   async fetch(request: Request): Promise<Response> {
     const url = new URL(request.url);
 
-    if (url.pathname === "/health") {
+    if (url.pathname === '/health') {
       return new Response(
-        JSON.stringify({ status: "ok", module: SHARED_MODULE_NAME }),
+        JSON.stringify({ status: 'ok', module: SHARED_MODULE_NAME }),
         {
-          headers: { "Content-Type": "application/json" },
+          headers: { 'Content-Type': 'application/json' },
         },
       );
     }
 
-    return new Response("Not Found", { status: 404 });
+    return new Response('Not Found', { status: 404 });
   },
 };
