@@ -1,6 +1,7 @@
 import type {
   DocumentCommitRequest,
   DocumentCommitResponse,
+  DocumentResponse,
   UploadSignFileItem,
   UploadSignResponse,
 } from '@patto-md/shared';
@@ -174,4 +175,67 @@ export async function commitDocument(
   }
 
   return (await response.json()) as DocumentCommitResponse;
+}
+
+/** ドキュメント取得APIのレスポンス型。 */
+export interface FetchDocumentResult {
+  /** ドキュメントの詳細データ。 */
+  document: DocumentResponse;
+  /** レスポンスの `Cache-Control` ヘッダー値。 */
+  cacheControl: string | null;
+}
+
+/**
+ * ドキュメント詳細取得API (`GET /api/documents/:id`) を呼び出し、ドキュメント情報とキャッシュ制御ヘッダーを取得する。
+ *
+ * @param id - ドキュメントID(Slug)。
+ * @param baseUrl - 接続先APIのベースURL。未指定時は `getApiBaseUrl()` の戻り値を使用する。
+ * @returns ドキュメント詳細および `Cache-Control` ヘッダー値を含むオブジェクト。
+ */
+export async function fetchDocument(
+  id: string,
+  baseUrl: string = getApiBaseUrl(),
+): Promise<FetchDocumentResult> {
+  /** ドキュメント詳細取得APIのエンドポイントURL。 */
+  const url = `${baseUrl}/api/documents/${id}`;
+
+  let response: Response;
+  try {
+    response = await fetch(url, {
+      method: 'GET',
+    });
+  } catch (error) {
+    const detail = error instanceof Error ? error.message : String(error);
+    throw new ApiError(
+      `ドキュメント取得APIへの接続に失敗しました: ${detail}`,
+      0,
+    );
+  }
+
+  if (!response.ok) {
+    let errorMessage = 'ドキュメントの取得に失敗しました。';
+    let details: unknown;
+    try {
+      const errorJson = (await response.json()) as {
+        error?: { message?: string; details?: unknown };
+      };
+      if (errorJson.error?.message) {
+        errorMessage = errorJson.error.message;
+      }
+      details = errorJson.error?.details;
+    } catch {
+      /* noop */
+    }
+    throw new ApiError(errorMessage, response.status, details);
+  }
+
+  /** APIから取得したドキュメント詳細レスポンス。 */
+  const document = (await response.json()) as DocumentResponse;
+  /** レスポンスから取得した `Cache-Control` ヘッダー値。 */
+  const cacheControl = response.headers.get('cache-control');
+
+  return {
+    document,
+    cacheControl,
+  };
 }

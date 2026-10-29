@@ -9,27 +9,12 @@ import {
 import { Hono } from 'hono';
 import { calculateDocumentCacheControl } from '../lib/cache';
 import { calculateExpiresAt } from '../lib/date';
+import { isValidR2Key } from '../lib/r2';
 import { generateSlug } from '../lib/slug';
 import type { AppEnv } from '../types';
 
 /** ドキュメント管理関連のサブルーター。 */
 export const documentsRouter = new Hono<AppEnv>();
-
-/**
- * R2オブジェクトキーが許容される安全な形式であるかを判定する。
- *
- * @param key 検証対象のR2キー文字列。
- * @returns 形式が正当である場合はtrue。
- */
-function isValidR2Key(key: string): boolean {
-  if (!key || typeof key !== 'string') {
-    return false;
-  }
-  if (key.includes('..') || key.startsWith('/') || key.includes('\\')) {
-    return false;
-  }
-  return key.startsWith('temp/uploads/');
-}
 
 /**
  * ドキュメントコミットエンドポイント。

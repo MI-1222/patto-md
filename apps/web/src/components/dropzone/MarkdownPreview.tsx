@@ -276,70 +276,22 @@ function renderAstNode(
         </td>
       );
 
-    case 'link':
-      return (
-        <a
-          key={key}
-          href={node.url}
-          target="_blank"
-          rel="noopener noreferrer"
-          className="text-blue-400 underline underline-offset-2 transition-colors hover:text-blue-300"
-        >
-          {node.children.map((c, i) =>
-            renderAstNode(c, i, previewUrlMap, missingPaths),
-          )}
-        </a>
-      );
-
-    case 'table':
-      return (
-        <div key={key} className="my-4 overflow-x-auto">
-          <table className="w-full border-collapse border border-neutral-800 text-left text-xs">
-            {node.children.map((c, i) =>
-              renderAstNode(c, i, previewUrlMap, missingPaths),
-            )}
-          </table>
-        </div>
-      );
-
-    case 'tableRow':
-      return (
-        <tr
-          key={key}
-          className="border-b border-neutral-800 transition-colors even:bg-neutral-950/40"
-        >
-          {node.children.map((c, i) =>
-            renderAstNode(c, i, previewUrlMap, missingPaths),
-          )}
-        </tr>
-      );
-
-    case 'tableCell':
-      return (
-        <td
-          key={key}
-          className="border border-neutral-800 p-2.5 text-neutral-300"
-        >
-          {node.children.map((c, i) =>
-            renderAstNode(c, i, previewUrlMap, missingPaths),
-          )}
-        </td>
-      );
-
     case 'thematicBreak':
       return <hr key={key} className="my-6 border-neutral-800" />;
 
-    default:
-      if ('children' in node && Array.isArray((node as any).children)) {
+    default: {
+      const parentNode = node as { children?: RootContent[] };
+      if ('children' in node && Array.isArray(parentNode.children)) {
         return (
           <div key={key}>
-            {(node as any).children.map((child: RootContent, i: number) =>
+            {parentNode.children.map((child: RootContent, i: number) =>
               renderAstNode(child, i, previewUrlMap, missingPaths),
             )}
           </div>
         );
       }
       return null;
+    }
   }
 }
 
@@ -376,7 +328,7 @@ export function MarkdownPreview({
         </div>
       )}
 
-      <article className="prose prose-invert max-w-none text-sm text-neutral-200">
+      <article className="prose max-w-none text-sm text-neutral-200 prose-invert">
         {renderAstNode(ast, 0, previewUrlMap, missingPaths)}
       </article>
     </div>

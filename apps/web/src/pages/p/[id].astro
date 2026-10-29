@@ -1,38 +1,82 @@
 ---
 /**
  * ドキュメント閲覧画面のエントリーポイント。
- * URLパラメータからドキュメントIDを取得し、表示画面を提供する。
+ *
+ * エッジSSR上でAPIからMarkdown本文とメタデータを取得し、サーバーサイドでサニタイズ済みHTMLに変換して配信する。
+ * 有効期限に応じた `Cache-Control` ヘッダーの設定と、動的OGPメタタグの出力を行う。
  */
+/* eslint-disable astro/no-set-html-directive */
 import BaseLayout from '../../layouts/BaseLayout.astro';
 import { SLUG_PATTERN } from '@patto-md/shared';
+import { fetchDocument, getApiBaseUrl } from '../../lib/api';
+import { renderMarkdown, extractDescription } from '../../lib/markdown';
+import { DocumentActionBar } from '../../components/viewer';
 
 const { id } = Astro.params;
 
-// Slug形式の事前検証。不正な形式の場合は404ページへリダイレクトする。
 if (!id || !SLUG_PATTERN.test(id)) {
   return Astro.redirect('/404');
 }
+
+let docData;
+try {
+  docData = await fetchDocument(id);
+} catch (_error) {
+  return Astro.redirect('/404');
+}
+
+const { document: doc, cacheControl } = docData;
+
+if (cacheControl) {
+  Astro.response.headers.set('Cache-Control', cacheControl);
+}
+
+const apiBaseUrl = getApiBaseUrl();
+/** サーバーサイドでHTMLに変換されたMarkdown本文。 */
+const { html: renderedHtml } = await renderMarkdown(doc.content, {
+  assetBaseUrl: apiBaseUrl,
+});
+
+/** 画面タイトルおよびOGPタイトル。 */
+const pageTitle = `${doc.title} - patto-md`;
+/** OGP用のドキュメント要約テキスト。 */
+const description =
+  extractDescription(doc.content, 140) ||
+  'patto-mdで共有されたMarkdownドキュメント。';
+
+/** OGP画像URL。添付画像が存在する場合はその先頭画像、存在しない場合はデフォルト画像を採用する。 */
+let ogImage = '/ogp.jpeg';
+if (doc.attachments.length > 0) {
+  const firstAttachment = doc.attachments[0];
+  ogImage = `${apiBaseUrl}/api/assets/${firstAttachment.r2Key}`;
+}
 ---
 
-<BaseLayout
-  title={`ドキュメント (${id}) - patto-md`}
-  description="patto-mdで共有されたMarkdownドキュメント。"
->
-  <div class="mx-auto max-w-4xl px-4 py-12 sm:px-6">
-    <div class="rounded-xl border border-neutral-800 bg-neutral-900/50 p-6 sm:p-8">
-      <div class="mb-4 flex items-center justify-between border-b border-neutral-800 pb-4">
-        <div>
-          <span class="font-mono text-xs text-neutral-500">
-            Document ID: {id}
-          </span>
-          <h1 class="mt-1 text-xl font-bold text-neutral-200">
-            ドキュメント閲覧画面の準備中
-          </h1>
-        </div>
+<BaseLayout title={pageTitle} description={description} image={ogImage}>
+  <div class="mx-auto max-w-4xl px-4 py-8 sm:px-6 sm:py-12">
+    <div class="overflow-hidden rounded-xl border border-neutral-800 bg-neutral-900/40 shadow-2xl backdrop-blur-sm">
+      <header class="border-b border-neutral-800 p-6 sm:p-8">
+        <h1 class="text-2xl font-bold tracking-tight text-neutral-100 sm:text-3xl">
+          {doc.title}
+        </h1>
+      </header>
+
+      <DocumentActionBar
+        client:load
+        documentId={doc.id}
+        rawMarkdown={doc.content}
+        expiresAt={doc.expiresAt}
+        createdAt={doc.createdAt}
+      />
+
+      {/* サーバーレンダリング済みMarkdown本文(ゼロJS出力) */}
+      <div class="px-6 py-8 sm:px-8 sm:py-10">
+        <!-- eslint-disable-next-line astro/no-set-html-directive -->
+        <article
+          class="prose prose-invert max-w-none text-neutral-200 prose-headings:font-bold prose-headings:tracking-tight prose-headings:text-neutral-100 prose-a:text-blue-400 prose-a:no-underline hover:prose-a:underline prose-code:rounded prose-code:bg-neutral-800 prose-code:px-1.5 prose-code:py-0.5 prose-code:font-mono prose-code:text-sm prose-code:text-neutral-200 prose-pre:border prose-pre:border-neutral-800 prose-pre:bg-neutral-950/80 prose-img:rounded-lg prose-table:overflow-x-auto"
+          set:html={renderedHtml}
+        />
       </div>
-      <p class="text-sm text-neutral-400">
-        閲覧画面の実装は後続のステップで提供されます。
-      </p>
     </div>
   </div>
 </BaseLayout>

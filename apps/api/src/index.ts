@@ -4,6 +4,7 @@ import { cors } from 'hono/cors';
 import { logger } from 'hono/logger';
 import { documentsRouter } from './routes/documents';
 import { uploadRouter } from './routes/upload';
+import { assetsRouter } from './routes/assets';
 import type { AppEnv } from './types';
 
 export * from './types';
@@ -79,5 +80,8 @@ app.route('/api/upload', uploadRouter);
 
 /** ドキュメント関連APIサブルーターのマウント。 */
 app.route('/api/documents', documentsRouter);
+
+/** アセット配信関連APIサブルーターのマウント。 */
+app.route('/api/assets', assetsRouter);
 
 export default app;

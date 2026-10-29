@@ -213,11 +213,15 @@ describe('cloneAstWithPreviewUrls (ASTプレビュー用URL置換)', () => {
     const previewAst = cloneAstWithPreviewUrls(parsed.ast, previewUrlMap);
 
     // 原本ASTのURLが保持されていることを確認。
-    const originalImageNode = (parsed.ast.children[0] as any).children[0];
+    const originalImageNode = (
+      parsed.ast.children[0] as { children: Array<{ url: string }> }
+    ).children[0];
     expect(originalImageNode.url).toBe('images/sample.png?v=1');
 
     // クローンASTのURLが`blob URL` に置換されていることを確認。
-    const clonedImageNode = (previewAst.children[0] as any).children[0];
+    const clonedImageNode = (
+      previewAst.children[0] as { children: Array<{ url: string }> }
+    ).children[0];
     expect(clonedImageNode.url).toBe(
       'blob:http://localhost:3000/preview-uuid-1',
     );

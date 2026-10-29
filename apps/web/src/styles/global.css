@@ -1,4 +1,5 @@
 @import 'tailwindcss';
+@plugin '@tailwindcss/typography';
 
 @layer base {
   :root {
@@ -24,26 +25,124 @@
   }
 }
 
-@layer base {
-  :root {
-    color-scheme: dark;
-  }
+.heading-anchor {
+  margin-left: 0.5rem;
+  opacity: 0;
+  text-decoration: none;
+  color: #71717a;
+  transition: opacity 0.15s ease-in-out;
+  scroll-margin-top: 5rem;
+}
 
-  html,
-  body {
-    min-height: 100%;
-    background-color: #09090b;
-    color: #f4f4f5;
-    font-family:
-      -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial,
-      sans-serif;
-  }
+h1:hover .heading-anchor,
+h2:hover .heading-anchor,
+h3:hover .heading-anchor,
+h4:hover .heading-anchor,
+h5:hover .heading-anchor,
+h6:hover .heading-anchor {
+  opacity: 1;
+}
 
-  code,
-  pre,
-  kbd {
-    font-family:
-      ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, 'Liberation Mono',
-      'Courier New', monospace;
-  }
+.heading-anchor:hover {
+  color: #60a5fa;
+}
+
+pre[class*='language-'] {
+  background-color: #121215;
+  border: 1px solid #27272a;
+  border-radius: 0.5rem;
+  padding: 1rem;
+  overflow-x: auto;
+}
+
+code[class*='language-'] {
+  color: #e4e4e7;
+  font-size: 0.875rem;
+  line-height: 1.5;
+}
+
+.token.comment,
+.token.prolog,
+.token.doctype,
+.token.cdata {
+  color: #71717a;
+  font-style: italic;
+}
+
+.token.punctuation {
+  color: #a1a1aa;
+}
+
+.token.property,
+.token.tag,
+.token.boolean,
+.token.number,
+.token.constant,
+.token.symbol,
+.token.deleted {
+  color: #f87171;
+}
+
+.token.selector,
+.token.attr-name,
+.token.string,
+.token.char,
+.token.builtin,
+.token.inserted {
+  color: #4ade80;
+}
+
+.token.operator,
+.token.entity,
+.token.url {
+  color: #38bdf8;
+}
+
+.token.atrule,
+.token.attr-value,
+.token.keyword {
+  color: #c084fc;
+}
+
+.token.function,
+.token.class-name {
+  color: #60a5fa;
+}
+
+.token.regex,
+.token.important,
+.token.variable {
+  color: #fbbf24;
+}
+
+.code-line {
+  display: block;
+  padding-left: 0.5rem;
+  padding-right: 0.5rem;
+  border-left: 3px solid transparent;
+}
+
+.code-line.inserted {
+  background-color: rgba(74, 222, 128, 0.1);
+  border-left-color: #4ade80;
+}
+
+.code-line.deleted {
+  background-color: rgba(248, 113, 113, 0.1);
+  border-left-color: #f87171;
+}
+
+.highlight-line {
+  background-color: rgba(96, 165, 250, 0.1);
+  border-left-color: #60a5fa;
+}
+
+.line-number::before {
+  display: inline-block;
+  width: 1rem;
+  text-align: right;
+  margin-right: 1rem;
+  margin-left: -0.5rem;
+  color: #52525b;
+  content: attr(line);
 }

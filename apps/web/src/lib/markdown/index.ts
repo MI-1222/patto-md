@@ -7,3 +7,4 @@ export * from './path';
 export * from './traverse';
 export * from './parser';
 export * from './reconcile';
+export * from './renderer';

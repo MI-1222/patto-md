@@ -5,6 +5,23 @@ import { AwsClient } from 'aws4fetch';
 export const DEFAULT_R2_BUCKET_NAME = 'patto-md-r2';
 
 /**
+ * R2オブジェクトキーが許容形式に適合しているかを判定する。
+ * パストラバーサルを防ぎ、`temp/uploads/` から始まる一時アップロードのパス形式かを検証する。
+ *
+ * @param key - 検証対象のR2キー文字列。
+ * @returns 形式が正当な場合は `true`、それ以外は `false`。
+ */
+export function isValidR2Key(key: string): boolean {
+  if (!key || typeof key !== 'string') {
+    return false;
+  }
+  if (key.includes('..') || key.startsWith('/') || key.includes('\\')) {
+    return false;
+  }
+  return key.startsWith('temp/uploads/');
+}
+
+/**
  * ファイル名をサニタイズし、パストラバーサルや不正文字を排除する。
  *
  * @param fileName 元のファイル名。

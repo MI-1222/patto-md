@@ -4,6 +4,7 @@ import {
   requestUploadSign,
   uploadToR2,
   commitDocument,
+  fetchDocument,
   ApiError,
 } from '../client';
 import type {
@@ -190,6 +191,62 @@ describe('APIクライアント(src/lib/api/client.ts)', () => {
       await expect(
         commitDocument(payload, 'http://localhost:8787'),
       ).rejects.toThrow('データベースの書き込みに失敗しました。');
+    });
+  });
+
+  describe('fetchDocument', () => {
+    it('正常時にドキュメント取得APIへGETリクエストを送信し、データとCache-Controlを取得する。', async () => {
+      const mockDocument = {
+        id: 'AbCdEf123456',
+        title: '閲覧テスト文書',
+        content: '# 見出し\n本文',
+        status: 'published',
+        expiresAt: '2026-11-01T00:00:00.000Z',
+        createdAt: '2026-10-30T00:00:00.000Z',
+        updatedAt: '2026-10-30T00:00:00.000Z',
+        attachments: [],
+      };
+
+      const mockHeaders = new Headers();
+      mockHeaders.set('cache-control', 'public, max-age=60, s-maxage=300');
+
+      globalThis.fetch = vi.fn().mockResolvedValue({
+        ok: true,
+        status: 200,
+        headers: mockHeaders,
+        json: async () => mockDocument,
+      } as unknown as Response);
+
+      const result = await fetchDocument(
+        'AbCdEf123456',
+        'http://localhost:8787',
+      );
+
+      expect(globalThis.fetch).toHaveBeenCalledWith(
+        'http://localhost:8787/api/documents/AbCdEf123456',
+        expect.objectContaining({
+          method: 'GET',
+        }),
+      );
+      expect(result.document).toEqual(mockDocument);
+      expect(result.cacheControl).toBe('public, max-age=60, s-maxage=300');
+    });
+
+    it('存在しないまたは期限切れドキュメントの場合に404のApiErrorをthrowする。', async () => {
+      globalThis.fetch = vi.fn().mockResolvedValue({
+        ok: false,
+        status: 404,
+        headers: new Headers(),
+        json: async () => ({
+          error: {
+            message: 'ドキュメントが見つかりません。',
+          },
+        }),
+      } as unknown as Response);
+
+      await expect(
+        fetchDocument('NotExist1234', 'http://localhost:8787'),
+      ).rejects.toThrow('ドキュメントが見つかりません。');
     });
   });
 });

@@ -8,3 +8,4 @@ export * from './FileIcons';
 export * from './BrandLogo';
 export * from './GitHubIcon';
 export * from './OpenInNew';
+export * from './ActionIcons';

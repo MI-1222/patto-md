@@ -1,4 +1,4 @@
-import type { Root, Image, Definition } from 'mdast';
+import type { Root } from 'mdast';
 import type { ExtractedImageRef } from './types';
 import type { VirtualFile } from '../../components/dropzone/types';
 
