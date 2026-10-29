@@ -1,7 +1,14 @@
 {
   "$schema": "node_modules/wrangler/config-schema.json",
   "name": "patto-md-web",
+  "main": "./dist/_worker.js/index.js",
   "compatibility_date": "2025-02-24",
   "compatibility_flags": ["nodejs_compat"],
-  "pages_build_output_dir": "dist"
+  "vars": {
+    "PUBLIC_API_URL": "https://patto-md-api.mi-1222.workers.dev"
+  },
+  "assets": {
+    "binding": "ASSETS",
+    "directory": "./dist"
+  }
 }

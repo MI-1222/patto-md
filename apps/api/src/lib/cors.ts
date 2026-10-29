@@ -33,9 +33,10 @@ export function resolveAllowedOrigin(
     return origin;
   }
 
-  // Cloudflare Pages ドメイン（プレビュー環境含む *.pages.dev）。
-  const pagesDevPattern = /^https:\/\/([a-zA-Z0-9-]+\.)*pages\.dev$/;
-  if (pagesDevPattern.test(origin)) {
+  // Cloudflare Pages ドメイン（プレビュー環境含む *.pages.dev）および Workers ドメイン（*.workers.dev）。
+  const cfDomainPattern =
+    /^https:\/\/([a-zA-Z0-9-]+\.)*(pages\.dev|workers\.dev)$/;
+  if (cfDomainPattern.test(origin)) {
     return origin;
   }
 

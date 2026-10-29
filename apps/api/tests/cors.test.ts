@@ -32,21 +32,26 @@ describe('CORS オリジン判定処理 (resolveAllowedOrigin)', () => {
     );
   });
 
-  test('Cloudflare Pages のプレビューおよび本番ドメイン (*.pages.dev) を動的許可すること。', () => {
-    // 本番プロジェクトドメイン。
+  test('Cloudflare Pages (*.pages.dev) および Workers (*.workers.dev) ドメインを動的許可すること。', () => {
+    // Pages 本番プロジェクトドメイン。
     assert.strictEqual(
       resolveAllowedOrigin('https://patto-md-web.pages.dev'),
       'https://patto-md-web.pages.dev',
     );
-    // プレビューブランチドメイン。
+    // Pages プレビューブランチドメイン。
     assert.strictEqual(
       resolveAllowedOrigin('https://feature-branch.patto-md-web.pages.dev'),
       'https://feature-branch.patto-md-web.pages.dev',
     );
-    // コミットハッシュ付きプレビュードメイン。
+    // Pages コミットハッシュ付きプレビュードメイン。
     assert.strictEqual(
       resolveAllowedOrigin('https://abc12345.patto-md-web.pages.dev'),
       'https://abc12345.patto-md-web.pages.dev',
+    );
+    // Workers フロントエンドドメイン。
+    assert.strictEqual(
+      resolveAllowedOrigin('https://patto-md-web.mi-1222.workers.dev'),
+      'https://patto-md-web.mi-1222.workers.dev',
     );
   });
 
