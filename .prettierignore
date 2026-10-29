@@ -17,6 +17,7 @@ coverage/
 .cache/
 .astro/
 .wrangler/
+worker-configuration.d.ts
 
 # Minified assets
 *.min.js

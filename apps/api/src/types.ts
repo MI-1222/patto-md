@@ -3,15 +3,10 @@
  */
 
 /**
- * Cloudflare Workers の環境バインディングおよび環境変数のインターフェース。
+ * Cloudflare Workers の環境バインディングおよびカスタム環境変数のインターフェース。
+ * `wrangler types` で自動生成されるグローバルな `Env` インターフェースを拡張する。
  */
-export interface Env {
-  /** Cloudflare D1 データベースインスタンス。 */
-  DB: D1Database;
-
-  /** Cloudflare R2 オブジェクトストレージバケット。 */
-  BUCKET: R2Bucket;
-
+export interface AppBindings extends Env {
   /** アプリケーション実行環境(development, production 等)。 */
   ENVIRONMENT?: string;
 
@@ -32,5 +27,5 @@ export interface Env {
  * Hono アプリケーションで使用する環境定義型。
  */
 export type AppEnv = {
-  Bindings: Env;
+  Bindings: AppBindings;
 };
