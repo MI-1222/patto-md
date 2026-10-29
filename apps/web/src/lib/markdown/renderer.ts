@@ -108,13 +108,13 @@ export const sanitizeSchema = {
 };
 
 /**
- * HAST構文木内の画像ノードを走査し、アセットURLを正規化するプラグイン。
- *
- * @param baseUrl - 前置するAPIベースURL文字列。
+ * HAST内の画像ノードを走査し、アセットURLを正規化する `rehype` プラグイン。
+ * `file.data.assetBaseUrl` からベースURLを取得し、`/api/assets/` で始まる画像パスを絶対URLへ変換する。
  */
-function rehypeResolveAssetUrls(baseUrl?: string) {
-  return (tree: HastRoot) => {
-    if (!baseUrl) {
+function rehypeResolveAssetUrls() {
+  return (tree: HastRoot, file: { data?: Record<string, unknown> }) => {
+    const baseUrl = file.data?.assetBaseUrl;
+    if (typeof baseUrl !== 'string' || baseUrl.length === 0) {
       return;
     }
     /** 末尾のスラッシュを除去して正規化したAPIベースURL。 */
@@ -132,44 +132,55 @@ function rehypeResolveAssetUrls(baseUrl?: string) {
 }
 
 /**
- * サーバーサイドでMarkdown文字列を安全なHTML文字列へレンダリングする。
- * GFM拡張構文、見出しアンカー、コードハイライト、XSSサニタイズを適用する。
+ * モジュールスコープで初期化し、イミュータブルに凍結した `unified` プロセッサ。
+ * リクエストごとのプラグイン再登録処理を省き、Cloudflare Workers や Cloudflare Pages での実行負荷を抑える。
+ */
+const markdownProcessor = unified()
+  .use(remarkParse)
+  .use(remarkGfm)
+  .use(remarkRehype, { allowDangerousHtml: false })
+  .use(rehypeSlug)
+  .use(rehypeAutolinkHeadings, {
+    behavior: 'append',
+    properties: {
+      className: ['heading-anchor'],
+      ariaLabel: '見出しへのパーマリンク',
+    },
+    content: {
+      type: 'element',
+      tagName: 'span',
+      properties: { className: ['heading-anchor-icon'], ariaHidden: 'true' },
+      children: [{ type: 'text', value: '#' }],
+    },
+  })
+  .use(rehypePrism, { ignoreMissing: true })
+  .use(rehypeResolveAssetUrls)
+  .use(
+    rehypeSanitize,
+    sanitizeSchema as unknown as Parameters<typeof rehypeSanitize>[0],
+  )
+  .use(rehypeStringify)
+  .freeze();
+
+/**
+ * Markdown文字列をHTMLへ変換する。
+ * GFM拡張構文、見出しアンカー、コードハイライト、サニタイズ処理を適用する。
  *
- * @param markdown - レンダリング対象のMarkdown生テキスト。
+ * @param markdown - レンダリング対象のMarkdown文字列。
  * @param options - アセットURL解決オプション。
- * @returns サニタイズ済みHTMLを含むレンダリング結果。
+ * @returns サニタイズ済みHTMLを含む変換結果。
  */
 export async function renderMarkdown(
   markdown: string,
   options: RenderMarkdownOptions = {},
 ): Promise<RenderMarkdownResult> {
-  const processor = unified()
-    .use(remarkParse)
-    .use(remarkGfm)
-    .use(remarkRehype, { allowDangerousHtml: false })
-    .use(rehypeSlug)
-    .use(rehypeAutolinkHeadings, {
-      behavior: 'append',
-      properties: {
-        className: ['heading-anchor'],
-        ariaLabel: '見出しへのパーマリンク',
-      },
-      content: {
-        type: 'element',
-        tagName: 'span',
-        properties: { className: ['heading-anchor-icon'], ariaHidden: 'true' },
-        children: [{ type: 'text', value: '#' }],
-      },
-    })
-    .use(rehypePrism, { ignoreMissing: true })
-    .use(rehypeResolveAssetUrls, options.assetBaseUrl)
-    .use(
-      rehypeSanitize,
-      sanitizeSchema as unknown as Parameters<typeof rehypeSanitize>[0],
-    )
-    .use(rehypeStringify);
+  const file = await markdownProcessor.process({
+    value: markdown,
+    data: {
+      assetBaseUrl: options.assetBaseUrl,
+    },
+  });
 
-  const file = await processor.process(markdown);
   return {
     html: String(file),
   };
