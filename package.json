@@ -1,0 +1,13 @@
+{
+  "name": "patto-md",
+  "version": "0.0.1",
+  "private": true,
+  "description": "Markdown文書と添付画像を即座にWeb公開するWebサービス。",
+  "scripts": {
+    "dev:web": "pnpm --filter @patto-md/web dev",
+    "dev:api": "pnpm --filter @patto-md/api dev",
+    "build": "pnpm -r build",
+    "typecheck": "pnpm -r typecheck"
+  },
+  "packageManager": "pnpm@10.33.0"
+}
