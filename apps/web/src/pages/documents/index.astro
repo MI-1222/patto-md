@@ -1,0 +1,55 @@
+---
+/**
+ * 公開ドキュメント一覧画面のエントリーポイント。
+ *
+ * エッジSSR上でAPIから公開中ドキュメントの初期データを取得し、
+ * クライアント側React Islandでタブ切り替えやページネーションを提供する。
+ */
+import BaseLayout from '../../layouts/BaseLayout.astro';
+import { fetchDocuments, resolveServerApiBaseUrl } from '../../lib/api';
+import { DocumentListContainer } from '../../components/documents';
+import type { DocumentListResponse } from '@patto-md/shared';
+
+/** サーバーサイド実行時に解決されたAPIベースURL。 */
+const apiBaseUrl = resolveServerApiBaseUrl(Astro.locals);
+
+/** SSR時に取得したドキュメント一覧の初期データ。 */
+let initialData: DocumentListResponse = {
+  items: [],
+  total: 0,
+  page: 1,
+  limit: 12,
+  totalPages: 0,
+};
+
+try {
+  const result = await fetchDocuments({
+    page: 1,
+    limit: 12,
+    baseUrl: apiBaseUrl,
+  });
+  initialData = result.data;
+
+  if (result.cacheControl) {
+    Astro.response.headers.set('Cache-Control', result.cacheControl);
+  }
+} catch (error) {
+  console.error('SSRにおけるドキュメント一覧取得でエラーが発生。', error);
+}
+
+/** ページタイトル。 */
+const pageTitle = '公開ドキュメント一覧 - patto-md';
+/** ページのメタディスクリプション。 */
+const description =
+  'patto-md上で公開されているMarkdownドキュメントの一覧です。';
+---
+
+<BaseLayout title={pageTitle} description={description}>
+  <main class="mx-auto max-w-5xl px-4 py-8 sm:px-6 sm:py-12">
+    <DocumentListContainer
+      client:load
+      initialData={initialData}
+      apiBaseUrl={apiBaseUrl}
+    />
+  </main>
+</BaseLayout>

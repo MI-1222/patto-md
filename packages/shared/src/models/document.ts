@@ -13,6 +13,9 @@ export interface DocumentRecord {
   /** ドキュメントのタイトル。 */
   title: string;
 
+  /** 本文の要約・抜粋(`null` の場合は未設定)。 */
+  description: string | null;
+
   /** R2上に保存されたMarkdown本文のオブジェクトキー。 */
   content_r2_key: string;
 

@@ -9,6 +9,7 @@ import { requestUploadSign, uploadToR2, commitDocument } from './client';
 import {
   getBasename,
   replaceMarkdownImageUrls,
+  extractDescription,
   type MarkdownParseResult,
   type ReconciliationResult,
   type ResolvedAsset,
@@ -261,6 +262,7 @@ export async function executePublishPipeline(
     'Untitled';
 
   const finalTitle = docTitle.slice(0, 100);
+  const docDescription = extractDescription(markdownContent, 160) || null;
 
   const attachmentsPayload: DocumentAttachmentCommit[] =
     uniqueResolvedAssets.map((asset) => {
@@ -277,6 +279,7 @@ export async function executePublishPipeline(
   const commitResponse = await commitDocument(
     {
       title: finalTitle,
+      description: docDescription ?? undefined,
       contentR2Key: markdownSign.r2Key,
       attachments: attachmentsPayload,
       expiration,

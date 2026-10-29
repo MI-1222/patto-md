@@ -1,6 +1,7 @@
 import type {
   DocumentCommitRequest,
   DocumentCommitResponse,
+  DocumentListResponse,
   DocumentResponse,
   UploadSignFileItem,
   UploadSignResponse,
@@ -26,6 +27,36 @@ export function getApiBaseUrl(): string {
   const envUrl = import.meta.env?.PUBLIC_API_URL;
   if (typeof envUrl === 'string' && envUrl.trim().length > 0) {
     return envUrl.trim().replace(/\/+$/, '');
+  }
+
+  return 'http://localhost:8787';
+}
+
+/**
+ * サーバーサイド(SSR)実行時のAPIベースURLを解決する。
+ *
+ * 開発モード(`import.meta.env.DEV`)時はローカルAPI(`http://localhost:8787`)を優先し、
+ * 本番環境ではCloudflare Workersランタイムの環境変数を参照する。
+ *
+ * @param locals - Astroの `locals` オブジェクト。
+ * @returns 正規化されたAPIベースURL。
+ */
+export function resolveServerApiBaseUrl(locals?: unknown): string {
+  if (import.meta.env.DEV) {
+    const devUrl = import.meta.env.PUBLIC_API_URL;
+    return typeof devUrl === 'string' && devUrl.trim().length > 0
+      ? devUrl.trim().replace(/\/+$/, '')
+      : 'http://localhost:8787';
+  }
+
+  const runtimeEnv = (
+    locals as { runtime?: { env?: { PUBLIC_API_URL?: string } } } | undefined
+  )?.runtime?.env;
+
+  const runtimeUrl =
+    runtimeEnv?.PUBLIC_API_URL || import.meta.env.PUBLIC_API_URL;
+  if (typeof runtimeUrl === 'string' && runtimeUrl.trim().length > 0) {
+    return runtimeUrl.trim().replace(/\/+$/, '');
   }
 
   return 'http://localhost:8787';
@@ -236,6 +267,89 @@ export async function fetchDocument(
 
   return {
     document,
+    cacheControl,
+  };
+}
+
+/** ドキュメント一覧取得オプションの定義。 */
+export interface FetchDocumentsParams {
+  /** 取得するページ番号(1始まり)。 */
+  page?: number;
+  /** 1ページあたりの取得件数。 */
+  limit?: number;
+  /** 絞り込み対象のドキュメントID配列。 */
+  ids?: string[];
+  /** 接続先APIのベースURL。 */
+  baseUrl?: string;
+}
+
+/** ドキュメント一覧取得結果の型定義。 */
+export interface FetchDocumentsResult {
+  /** ドキュメント一覧レスポンスデータ。 */
+  data: DocumentListResponse;
+  /** レスポンスの `Cache-Control` ヘッダー値。 */
+  cacheControl: string | null;
+}
+
+/**
+ * ドキュメント一覧取得API (`GET /api/documents`) を呼び出し、一覧データとキャッシュ制御ヘッダーを取得する。
+ *
+ * @param params - 取得オプション。
+ * @returns 一覧データおよび `Cache-Control` ヘッダー値を含むオブジェクト。
+ */
+export async function fetchDocuments(
+  params: FetchDocumentsParams = {},
+): Promise<FetchDocumentsResult> {
+  const { page, limit, ids, baseUrl = getApiBaseUrl() } = params;
+
+  const query = new URLSearchParams();
+  if (page !== undefined && page > 0) {
+    query.set('page', String(page));
+  }
+  if (limit !== undefined && limit > 0) {
+    query.set('limit', String(limit));
+  }
+  if (ids && ids.length > 0) {
+    query.set('ids', ids.join(','));
+  }
+
+  const queryString = query.toString();
+  /** リクエスト先のエンドポイントURL。 */
+  const url = `${baseUrl}/api/documents${queryString ? `?${queryString}` : ''}`;
+
+  let response: Response;
+  try {
+    response = await fetch(url, {
+      method: 'GET',
+    });
+  } catch (error) {
+    const detail = error instanceof Error ? error.message : String(error);
+    throw new ApiError(
+      `ドキュメント一覧取得APIへの接続に失敗しました: ${detail}`,
+      0,
+    );
+  }
+
+  if (!response.ok) {
+    let errorMessage = 'ドキュメント一覧の取得に失敗しました。';
+    let details: unknown;
+    try {
+      const errorJson = (await response.json()) as {
+        error?: { message?: string; details?: unknown };
+      };
+      if (errorJson.error?.message) {
+        errorMessage = errorJson.error.message;
+      }
+      details = errorJson.error?.details;
+    } catch {}
+    throw new ApiError(errorMessage, response.status, details);
+  }
+
+  const data = (await response.json()) as DocumentListResponse;
+  const cacheControl = response.headers.get('cache-control');
+
+  return {
+    data,
     cacheControl,
   };
 }

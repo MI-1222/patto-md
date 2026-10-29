@@ -8,6 +8,7 @@ import {
   type PublishProgressInfo,
 } from '../../lib/api/publish';
 import { ApiError } from '../../lib/api/client';
+import { addMyDocumentId } from '../../lib/storage/myDocuments';
 import type {
   MarkdownParseResult,
   ReconciliationResult,
@@ -129,6 +130,8 @@ export function useDocumentPublish(): UseDocumentPublishReturn {
         setProgressPercent(100);
         setProgressMessage('ドキュメントの公開に成功。');
         setPublishedUrl(commitResponse.url);
+
+        addMyDocumentId(commitResponse.id);
 
         if (onSuccess) {
           onSuccess(commitResponse);

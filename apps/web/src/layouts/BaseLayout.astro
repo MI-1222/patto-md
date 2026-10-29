@@ -6,6 +6,7 @@
 import '../styles/global.css';
 import Header from '../components/common/Header.astro';
 import Footer from '../components/common/Footer.astro';
+import { resolveServerApiBaseUrl } from '../lib/api';
 
 interface Props {
   title?: string;
@@ -21,12 +22,8 @@ const {
 
 const ogImageUrl = new URL(image, Astro.url).href;
 
-/** ランタイム環境変数またはビルド時環境変数から取得したAPIベースURL。 */
-const resolvedApiUrl =
-  (Astro.locals as { runtime?: { env?: { PUBLIC_API_URL?: string } } })?.runtime
-    ?.env?.PUBLIC_API_URL ||
-  import.meta.env.PUBLIC_API_URL ||
-  '';
+/** サーバーサイド実行時に解決されたAPIベースURL。 */
+const resolvedApiUrl = resolveServerApiBaseUrl(Astro.locals);
 ---
 
 <!doctype html>

@@ -8,7 +8,7 @@
 /* eslint-disable astro/no-set-html-directive */
 import BaseLayout from '../../layouts/BaseLayout.astro';
 import { SLUG_PATTERN } from '@patto-md/shared';
-import { fetchDocument } from '../../lib/api';
+import { fetchDocument, resolveServerApiBaseUrl } from '../../lib/api';
 import { renderMarkdown, extractDescription } from '../../lib/markdown';
 import { DocumentActionBar } from '../../components/viewer';
 
@@ -18,14 +18,8 @@ if (!id || !SLUG_PATTERN.test(id)) {
   return Astro.redirect('/404');
 }
 
-/** Cloudflare Workers ランタイム環境変数またはビルド時環境変数からAPIベースURLを解決する。 */
-const runtimeEnv = (
-  Astro.locals as { runtime?: { env?: { PUBLIC_API_URL?: string } } }
-)?.runtime?.env;
-const apiBaseUrl =
-  runtimeEnv?.PUBLIC_API_URL ||
-  import.meta.env.PUBLIC_API_URL ||
-  'http://localhost:8787';
+/** サーバーサイド実行時に解決されたAPIベースURL。 */
+const apiBaseUrl = resolveServerApiBaseUrl(Astro.locals);
 
 let docData;
 try {

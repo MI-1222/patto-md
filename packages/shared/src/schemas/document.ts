@@ -49,6 +49,12 @@ export const documentCommitRequestSchema = z.object({
       `タイトルは${MAX_TITLE_LENGTH}文字以下である必要がある。`,
     ),
 
+  /** 本文の要約・抜粋テキスト(任意)。 */
+  description: z
+    .string()
+    .max(500, '抜粋は500文字以下である必要がある。')
+    .optional(),
+
   /** R2にアップロード済みのMarkdown本文のオブジェクトキー。 */
   contentR2Key: z.string().min(1, '本文のR2キーは必須である。'),
 
@@ -116,3 +122,48 @@ export const documentResponseSchema = z.object({
 
 /** ドキュメント詳細閲覧レスポンスの型。 */
 export type DocumentResponse = z.infer<typeof documentResponseSchema>;
+
+/** ドキュメント一覧の単一項目スキーマ。 */
+export const documentListItemSchema = z.object({
+  /** ドキュメントID(`slug`)。 */
+  id: z.string(),
+
+  /** ドキュメントのタイトル。 */
+  title: z.string(),
+
+  /** 本文の要約・抜粋テキスト(未設定時は `null`)。 */
+  description: z.string().nullable(),
+
+  /** 有効期限日時(ISO 8601文字列、無期限時は `null`)。 */
+  expiresAt: z.string().datetime().nullable(),
+
+  /** 作成日時(ISO 8601文字列)。 */
+  createdAt: z.string().datetime(),
+
+  /** 添付ファイル数。 */
+  attachmentCount: z.number().int().nonnegative(),
+});
+
+/** ドキュメント一覧の単一要素型。 */
+export type DocumentListItem = z.infer<typeof documentListItemSchema>;
+
+/** ドキュメント一覧取得レスポンス(`GET /api/documents`)のスキーマ。 */
+export const documentListResponseSchema = z.object({
+  /** ドキュメント一覧。 */
+  items: z.array(documentListItemSchema),
+
+  /** 検索条件に合致する総件数。 */
+  total: z.number().int().nonnegative(),
+
+  /** 現在のページ番号(1始まり)。 */
+  page: z.number().int().positive(),
+
+  /** 1ページあたりの最大取得件数。 */
+  limit: z.number().int().positive(),
+
+  /** 総ページ数。 */
+  totalPages: z.number().int().nonnegative(),
+});
+
+/** ドキュメント一覧取得レスポンスの型。 */
+export type DocumentListResponse = z.infer<typeof documentListResponseSchema>;

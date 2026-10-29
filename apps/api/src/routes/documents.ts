@@ -2,6 +2,8 @@ import {
   documentCommitRequestSchema,
   type AttachmentRecord,
   type DocumentCommitResponse,
+  type DocumentListItem,
+  type DocumentListResponse,
   type DocumentRecord,
   type DocumentResponse,
   SLUG_PATTERN,
@@ -51,7 +53,8 @@ documentsRouter.post('/', async (c) => {
     );
   }
 
-  const { title, contentR2Key, attachments, expiration } = parseResult.data;
+  const { title, description, contentR2Key, attachments, expiration } =
+    parseResult.data;
 
   // R2オブジェクトキーの形式およびパストラバーサル検証。
   if (!isValidR2Key(contentR2Key)) {
@@ -161,13 +164,22 @@ documentsRouter.post('/', async (c) => {
       `INSERT INTO documents (
         id,
         title,
+        description,
         content_r2_key,
         status,
         expires_at,
         created_at,
         updated_at
-      ) VALUES (?, ?, ?, 'published', ?, ?, ?)`,
-    ).bind(candidateSlug, title, contentR2Key, expiresAt, createdAt, updatedAt);
+      ) VALUES (?, ?, ?, ?, 'published', ?, ?, ?)`,
+    ).bind(
+      candidateSlug,
+      title,
+      description ?? null,
+      contentR2Key,
+      expiresAt,
+      createdAt,
+      updatedAt,
+    );
 
     // 添付ファイル群の登録ステートメント配列(外部キー順序を担保)。
     const attachmentStatements = attachments.map((attachment) => {
@@ -248,6 +260,137 @@ documentsRouter.post('/', async (c) => {
   };
 
   return c.json(responsePayload, 201);
+});
+
+/** D1のドキュメント一覧クエリが返却するレコード型。 */
+interface DocumentListRow {
+  /** ドキュメントID(`slug`)。 */
+  id: string;
+  /** ドキュメントのタイトル。 */
+  title: string;
+  /** 本文の要約・抜粋(`null` の場合は未設定)。 */
+  description: string | null;
+  /** 有効期限日時(ISO 8601文字列、無期限時は `null`)。 */
+  expires_at: string | null;
+  /** 作成日時(ISO 8601文字列)。 */
+  created_at: string;
+  /** 添付ファイル数。 */
+  attachment_count: number;
+}
+
+/**
+ * ドキュメント一覧取得エンドポイント。
+ *
+ * 公開中で有効期限内のドキュメント一覧を新着順でページネーション返却する。
+ * クエリパラメーター `ids` にカンマ区切りでドキュメントID群が指定された場合は、該当ドキュメントのみを抽出する。
+ */
+documentsRouter.get('/', async (c) => {
+  const pageParam = parseInt(c.req.query('page') || '1', 10);
+  const page = Number.isFinite(pageParam) && pageParam > 0 ? pageParam : 1;
+
+  const limitParam = parseInt(c.req.query('limit') || '12', 10);
+  const limit =
+    Number.isFinite(limitParam) && limitParam > 0
+      ? Math.min(limitParam, 50)
+      : 12;
+
+  const offset = (page - 1) * limit;
+
+  const rawIds = c.req.query('ids');
+  let targetIds: string[] = [];
+  if (rawIds) {
+    targetIds = rawIds
+      .split(',')
+      .map((id) => id.trim())
+      .filter((id) => SLUG_PATTERN.test(id));
+
+    if (targetIds.length === 0) {
+      const emptyResponse: DocumentListResponse = {
+        items: [],
+        total: 0,
+        page,
+        limit,
+        totalPages: 0,
+      };
+      return c.json(emptyResponse, 200);
+    }
+  }
+
+  const nowIso = new Date().toISOString();
+
+  try {
+    let whereClause =
+      "d.status = 'published' AND (d.expires_at IS NULL OR d.expires_at > ?)";
+    const queryParams: unknown[] = [nowIso];
+
+    if (targetIds.length > 0) {
+      const placeholders = targetIds.map(() => '?').join(', ');
+      whereClause += ` AND d.id IN (${placeholders})`;
+      queryParams.push(...targetIds);
+    }
+
+    const countQuery = `SELECT COUNT(*) AS total FROM documents d WHERE ${whereClause}`;
+    const countStatement = c.env.DB.prepare(countQuery).bind(...queryParams);
+    const countResult = await countStatement.first<{ total: number }>();
+    const total = countResult?.total ?? 0;
+
+    const listQuery = `
+      SELECT
+        d.id,
+        d.title,
+        d.description,
+        d.expires_at,
+        d.created_at,
+        COUNT(a.id) AS attachment_count
+      FROM documents d
+      LEFT JOIN attachments a ON d.id = a.document_id
+      WHERE ${whereClause}
+      GROUP BY d.id
+      ORDER BY d.created_at DESC
+      LIMIT ? OFFSET ?
+    `;
+
+    const listStatement = c.env.DB.prepare(listQuery).bind(
+      ...queryParams,
+      limit,
+      offset,
+    );
+    const listResult = await listStatement.all<DocumentListRow>();
+    const rows = listResult.results ?? [];
+
+    const items: DocumentListItem[] = rows.map((row) => ({
+      id: row.id,
+      title: row.title,
+      description: row.description ?? null,
+      expiresAt: row.expires_at,
+      createdAt: row.created_at,
+      attachmentCount: Number(row.attachment_count || 0),
+    }));
+
+    const totalPages = Math.ceil(total / limit);
+
+    c.header('Cache-Control', 'public, max-age=10, s-maxage=30');
+
+    const responsePayload: DocumentListResponse = {
+      items,
+      total,
+      page,
+      limit,
+      totalPages,
+    };
+
+    return c.json(responsePayload, 200);
+  } catch (error) {
+    console.error('D1ドキュメント一覧取得エラー:', error);
+    return c.json(
+      {
+        error: {
+          message: 'ドキュメント一覧の取得に失敗しました。',
+        },
+      },
+      500,
+    );
+  }
 });
 
 /**

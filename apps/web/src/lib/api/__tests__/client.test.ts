@@ -5,6 +5,7 @@ import {
   uploadToR2,
   commitDocument,
   fetchDocument,
+  fetchDocuments,
   ApiError,
 } from '../client';
 import type {
@@ -247,6 +248,64 @@ describe('APIクライアント(src/lib/api/client.ts)', () => {
       await expect(
         fetchDocument('NotExist1234', 'http://localhost:8787'),
       ).rejects.toThrow('ドキュメントが見つかりません。');
+    });
+  });
+
+  describe('fetchDocuments', () => {
+    it('正常時にドキュメント一覧とキャッシュ制御ヘッダーを取得する。', async () => {
+      const mockListResponse = {
+        items: [
+          {
+            id: 'valid-slug-12',
+            title: '一覧テスト',
+            description: '抜粋テキスト',
+            expiresAt: null,
+            createdAt: '2026-10-30T00:00:00.000Z',
+            attachmentCount: 2,
+          },
+        ],
+        total: 1,
+        page: 1,
+        limit: 12,
+        totalPages: 1,
+      };
+
+      const mockHeaders = new Headers();
+      mockHeaders.set('Cache-Control', 'public, max-age=10');
+
+      globalThis.fetch = vi.fn().mockResolvedValue({
+        ok: true,
+        status: 200,
+        headers: mockHeaders,
+        json: async () => mockListResponse,
+      } as unknown as Response);
+
+      const result = await fetchDocuments({
+        page: 2,
+        limit: 10,
+        ids: ['valid-slug-12'],
+        baseUrl: 'http://localhost:8787',
+      });
+
+      expect(globalThis.fetch).toHaveBeenCalledWith(
+        'http://localhost:8787/api/documents?page=2&limit=10&ids=valid-slug-12',
+        { method: 'GET' },
+      );
+      expect(result.data).toEqual(mockListResponse);
+      expect(result.cacheControl).toBe('public, max-age=10');
+    });
+
+    it('APIエラー時に適切な `ApiError` を送出する。', async () => {
+      globalThis.fetch = vi.fn().mockResolvedValue({
+        ok: false,
+        status: 500,
+        headers: new Headers(),
+        json: async () => ({
+          error: { message: '一覧取得エラー。' },
+        }),
+      } as unknown as Response);
+
+      await expect(fetchDocuments()).rejects.toThrow('一覧取得エラー。');
     });
   });
 });

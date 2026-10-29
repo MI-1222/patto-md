@@ -1,5 +1,5 @@
 import type { APIRoute } from 'astro';
-import { getApiBaseUrl } from '../../../lib/api';
+import { resolveServerApiBaseUrl } from '../../../lib/api';
 
 /**
  * アセット配信用リバースプロキシエンドポイント。
@@ -16,13 +16,8 @@ export const GET: APIRoute = async ({ params, locals }) => {
     return new Response('無効なアセットパス。', { status: 400 });
   }
 
-  const runtimeEnv = (
-    locals as { runtime?: { env?: { PUBLIC_API_URL?: string } } }
-  )?.runtime?.env;
-  const apiBaseUrl =
-    runtimeEnv?.PUBLIC_API_URL ||
-    import.meta.env.PUBLIC_API_URL ||
-    getApiBaseUrl();
+  /** 解決されたAPIベースURL。 */
+  const apiBaseUrl = resolveServerApiBaseUrl(locals);
   /** バックエンドAPIのアセット取得エンドポイントURL。 */
   const targetUrl = `${apiBaseUrl}/api/assets/${assetPath}`;
 

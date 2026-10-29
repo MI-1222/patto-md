@@ -12,6 +12,8 @@ interface Props {
 }
 
 const { className = '' } = Astro.props;
+const currentPath = Astro.url.pathname;
+const isDocumentsActive = currentPath.startsWith('/documents');
 ---
 
 <header
@@ -30,7 +32,18 @@ const { className = '' } = Astro.props;
       </a>
     </div>
 
-    <nav class="flex items-center gap-4 text-sm text-neutral-400">
+    <nav class="flex items-center gap-5 text-sm text-neutral-400">
+      <a
+        href="/documents"
+        class:list={[
+          'text-xs font-mono transition-colors hover:text-neutral-100',
+          isDocumentsActive
+            ? 'text-blue-400 font-semibold'
+            : 'text-neutral-400',
+        ]}
+      >
+        公開一覧
+      </a>
       <a
         href="https://github.com/MI-1222/patto-md"
         target="_blank"
