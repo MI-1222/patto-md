@@ -15,23 +15,23 @@ const app = new Hono<AppEnv>();
 app.use('*', logger());
 
 // CORS(Cross-Origin Resource Sharing)ミドルウェアの設定。
-app.use('*', async (c, next) => {
-  const allowedOrigins = ['http://localhost:4321', 'http://127.0.0.1:4321'];
+app.use(
+  '*',
+  cors({
+    origin: (origin, c) => {
+      const allowedOrigins = ['http://localhost:4321', 'http://127.0.0.1:4321'];
 
-  if (c.env.FRONTEND_ORIGIN) {
-    allowedOrigins.push(c.env.FRONTEND_ORIGIN);
-  }
+      if (c.env.FRONTEND_ORIGIN) {
+        allowedOrigins.push(c.env.FRONTEND_ORIGIN);
+      }
 
-  const corsMiddleware = cors({
-    origin: (origin) =>
-      allowedOrigins.includes(origin) ? origin : allowedOrigins[0],
+      return allowedOrigins.includes(origin) ? origin : null;
+    },
     allowMethods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
     allowHeaders: ['Content-Type', 'Authorization'],
     maxAge: 86400,
-  });
-
-  return corsMiddleware(c, next);
-});
+  }),
+);
 
 // 未検出ルートのハンドリング。
 app.notFound((c) => {
