@@ -1,0 +1,28 @@
+package.json
+
+# lockファイル
+package-lock.json
+yarn.lock
+pnpm-lock.yaml
+bun.lockb
+
+# 依存関係, ビルド成果物
+node_modules/
+dist/
+build/
+out/
+.next/
+.nuxt/
+coverage/
+.cache/
+.astro/
+.wrangler/
+
+# Minified assets
+*.min.js
+*.min.css
+
+# OS, エディタ
+.DS_Store
+*.code-workspace
+snippets/
