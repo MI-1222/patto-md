@@ -20,6 +20,13 @@ const {
 } = Astro.props;
 
 const ogImageUrl = new URL(image, Astro.url).href;
+
+/** ランタイム環境変数またはビルド時環境変数から取得したAPIベースURL。 */
+const resolvedApiUrl =
+  (Astro.locals as { runtime?: { env?: { PUBLIC_API_URL?: string } } })?.runtime
+    ?.env?.PUBLIC_API_URL ||
+  import.meta.env.PUBLIC_API_URL ||
+  '';
 ---
 
 <!doctype html>
@@ -30,6 +37,20 @@ const ogImageUrl = new URL(image, Astro.url).href;
     <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
     <link rel="apple-touch-icon" href="/apple-touch-icon.png" />
     <meta name="generator" content={Astro.generator} />
+
+    {resolvedApiUrl && <script
+      is:inline
+      define:vars={{ apiUrl: resolvedApiUrl }}
+    >
+      window.__PATTO_API_URL__ = apiUrl;
+    </script>}
+
+    {resolvedApiUrl && <script
+      is:inline
+      define:vars={{ apiUrl: resolvedApiUrl }}
+    >
+      window.__PATTO_API_URL__ = apiUrl;
+    </script>}
 
     <title>{title}</title>
     <meta name="description" content={description} />
