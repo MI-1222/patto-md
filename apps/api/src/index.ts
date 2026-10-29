@@ -5,9 +5,11 @@ import { logger } from 'hono/logger';
 import { documentsRouter } from './routes/documents';
 import { uploadRouter } from './routes/upload';
 import { assetsRouter } from './routes/assets';
+import { resolveAllowedOrigin } from './lib/cors';
 import type { AppEnv } from './types';
 
 export * from './types';
+export { resolveAllowedOrigin } from './lib/cors';
 
 /** Hono アプリケーションインスタンスの初期化。 */
 const app = new Hono<AppEnv>();
@@ -19,15 +21,7 @@ app.use('*', logger());
 app.use(
   '*',
   cors({
-    origin: (origin, c) => {
-      const allowedOrigins = ['http://localhost:4321', 'http://127.0.0.1:4321'];
-
-      if (c.env.FRONTEND_ORIGIN) {
-        allowedOrigins.push(c.env.FRONTEND_ORIGIN);
-      }
-
-      return allowedOrigins.includes(origin) ? origin : null;
-    },
+    origin: (origin, c) => resolveAllowedOrigin(origin, c.env.FRONTEND_ORIGIN),
     allowMethods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
     allowHeaders: ['Content-Type', 'Authorization'],
     maxAge: 86400,
