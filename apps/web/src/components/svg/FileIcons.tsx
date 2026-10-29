@@ -90,3 +90,59 @@ export function CloseSvg({
     </svg>
   );
 }
+
+/**
+ * チェックマーク(成功)アイコンコンポーネント。
+ *
+ * @param props - SVGプロパティ。
+ * @returns SVG要素。
+ */
+export function CheckSvg({
+  className = 'size-4',
+  ...props
+}: SVGProps<SVGSVGElement>) {
+  return (
+    <svg
+      xmlns="http://www.w3.org/2000/svg"
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="2"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      className={className}
+      aria-hidden="true"
+      {...props}
+    >
+      <path d="M9.55,18l-5.7-5.7l1.43-1.42l4.28,4.28l9.18-9.18L20.15,7.4L9.55,18Z" />
+    </svg>
+  );
+}
+
+/**
+ * 警告(注意)アイコンコンポーネント。
+ *
+ * @param props - SVGプロパティ。
+ * @returns SVG要素。
+ */
+export function WarningSvg({
+  className = 'size-4',
+  ...props
+}: SVGProps<SVGSVGElement>) {
+  return (
+    <svg
+      xmlns="http://www.w3.org/2000/svg"
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="2"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      className={className}
+      aria-hidden="true"
+      {...props}
+    >
+      <path d="M1,21L12,2L23,21H1Zm3.45-2h15.1L12,6L4.45,19Zm8.26-1.29Q13,17.43 13,17t-0.29-0.71T12,16t-0.71,0.29T11,17t0.29,0.71T12,18t0.71-0.29ZM11,15h2V10H11v5Zm1-2.5Z" />
+    </svg>
+  );
+}

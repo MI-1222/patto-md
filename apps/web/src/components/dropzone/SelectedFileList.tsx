@@ -1,5 +1,15 @@
-import { FileDocumentSvg, ImageSvg, CloseSvg } from '../svg/FileIcons';
+import { useState } from 'react';
+import type { Root } from 'mdast';
+import {
+  FileDocumentSvg,
+  ImageSvg,
+  CloseSvg,
+  CheckSvg,
+  WarningSvg,
+} from '../svg/FileIcons';
+import { MarkdownPreview } from './MarkdownPreview';
 import type { ParsedFiles, VirtualFile } from './types';
+import type { ReconciliationResult } from '../../lib/markdown';
 
 /**
  * ファイルサイズを人間が読みやすい形式に変換する。
@@ -23,19 +33,43 @@ function formatFileSize(bytes: number): string {
 interface SelectedFileListProps {
   /** パース済みファイル群。 */
   parsedFiles: ParsedFiles;
+  /** 突合結果オブジェクト。 */
+  reconciliation: ReconciliationResult | null;
+  /** プレビュー用URLマップ。 */
+  previewUrlMap: Map<string, string>;
+  /** MDAST構文木ルート。 */
+  ast: Root | null;
+  /** ドキュメントタイトル。 */
+  title: string | null;
+  /** 突合・解析中フラグ。 */
+  isResolving: boolean;
+  /** 公開準備完了フラグ。 */
+  isReadyToPublish: boolean;
+  /** 不足画像モーダル表示ハンドラー。 */
+  onOpenMissingModal: () => void;
   /** リセットハンドラー。 */
   onReset: () => void;
+  /** 公開ボタン押下ハンドラー(将来の実装用)。 */
+  onPublishClick?: () => void;
 }
 
 /**
- * 選択・投入されたファイル一覧を表示するプレビューコンポーネント。
+ * 選択・投入されたファイル一覧およびプレビューを表示するコンポーネント。
  *
- * @param props - コンポーネントプロパティ。
- * @returns ファイル一覧表示UI。
+ * @param props - コンポーネントのプロパティ。
+ * @returns ファイル一覧およびプレビューUI。
  */
 export function SelectedFileList({
   parsedFiles,
+  reconciliation,
+  previewUrlMap,
+  ast,
+  title,
+  isResolving,
+  isReadyToPublish,
+  onOpenMissingModal,
   onReset,
+  onPublishClick,
 }: SelectedFileListProps) {
   const {
     markdownFile,
@@ -45,15 +79,29 @@ export function SelectedFileList({
     hasInvalidFiles,
   } = parsedFiles;
 
+  const [activeTab, setActiveTab] = useState<'files' | 'preview'>('files');
+  const [allowIncompletePublish, setAllowIncompletePublish] = useState(false);
+
   const assetList = Array.from(assetFiles.values());
+  const missingCount = reconciliation?.missing.length || 0;
+  const missingPaths = new Set(
+    reconciliation?.missing.map((m) => m.cleanPath) || [],
+  );
+
+  // 公開可能判定: 基本条件 + (完全解決 または ユーザーによる不足容認)。
+  const canPublish =
+    markdownFile !== null &&
+    !hasInvalidFiles &&
+    reconciliation !== null &&
+    (reconciliation.isComplete || allowIncompletePublish);
 
   return (
     <div className="space-y-6">
-      {/* 全体サマリーおよびアクション */}
-      <div className="flex flex-wrap items-center justify-between gap-3 border-b border-neutral-800 pb-4">
+      {/* 全体サマリーおよびタブ切替 */}
+      <div className="flex flex-wrap items-center justify-between gap-4 border-b border-neutral-800 pb-4">
         <div>
           <h2 className="text-base font-bold text-neutral-100">
-            受け付けたファイル
+            受け付けたドキュメント
           </h2>
           <p className="mt-0.5 text-xs text-neutral-400">
             合計: {assetList.length + (markdownFile ? 1 : 0)} 件 (
@@ -70,17 +118,45 @@ export function SelectedFileList({
           </p>
         </div>
 
-        <button
-          type="button"
-          onClick={onReset}
-          className="inline-flex items-center gap-1.5 rounded-lg border border-neutral-700/80 bg-neutral-800/60 px-3 py-1.5 text-xs font-medium text-neutral-300 transition-colors hover:border-neutral-600 hover:bg-neutral-800 hover:text-neutral-100"
-        >
-          <CloseSvg className="size-3.5" />
-          <span>クリアして選び直す</span>
-        </button>
+        {/* タブ切り替えコントロール */}
+        <div className="flex items-center gap-2">
+          <div className="flex rounded-lg border border-neutral-800 bg-neutral-950 p-0.5 text-xs">
+            <button
+              type="button"
+              onClick={() => setActiveTab('files')}
+              className={`rounded-md px-3 py-1 font-medium transition-colors ${
+                activeTab === 'files'
+                  ? 'bg-neutral-800 text-neutral-100 shadow-xs'
+                  : 'text-neutral-400 hover:text-neutral-200'
+              }`}
+            >
+              ファイル構成
+            </button>
+            <button
+              type="button"
+              onClick={() => setActiveTab('preview')}
+              className={`rounded-md px-3 py-1 font-medium transition-colors ${
+                activeTab === 'preview'
+                  ? 'bg-neutral-800 text-neutral-100 shadow-xs'
+                  : 'text-neutral-400 hover:text-neutral-200'
+              }`}
+            >
+              プレビュー
+            </button>
+          </div>
+
+          <button
+            type="button"
+            onClick={onReset}
+            className="inline-flex items-center gap-1.5 rounded-lg border border-neutral-700/80 bg-neutral-800/60 px-3 py-1.5 text-xs font-medium text-neutral-300 transition-colors hover:border-neutral-600 hover:bg-neutral-800 hover:text-neutral-100"
+          >
+            <CloseSvg className="size-3.5" />
+            <span>選び直す</span>
+          </button>
+        </div>
       </div>
 
-      {/* エラー警告表示 */}
+      {/* 制約違反エラー警告表示 */}
       {hasInvalidFiles && (
         <div className="rounded-lg border border-red-500/30 bg-red-950/20 p-3 text-xs text-red-300">
           <p className="font-semibold">一部のファイルに問題があります。</p>
@@ -101,80 +177,221 @@ export function SelectedFileList({
         </div>
       )}
 
-      {/* Markdownファイル表示 */}
-      <div className="space-y-2">
-        <span className="text-xs font-semibold tracking-wider text-neutral-400 uppercase">
-          Markdownドキュメント
-        </span>
-        {markdownFile ? (
-          <div className="flex items-center justify-between rounded-xl border border-blue-500/30 bg-blue-950/10 p-3.5 sm:p-4">
-            <div className="flex min-w-0 items-center gap-3">
-              <div className="flex size-9 shrink-0 items-center justify-center rounded-lg bg-blue-600/20 text-blue-400">
-                <FileDocumentSvg className="size-5" />
-              </div>
-              <div className="min-w-0 truncate">
-                <p className="truncate text-sm font-semibold text-neutral-100">
-                  {markdownFile.relativePath}
-                </p>
-                <p className="text-xs text-neutral-400">
-                  {formatFileSize(markdownFile.file.size)}
-                </p>
-              </div>
+      {/* 未解決画像アラートバナー */}
+      {missingCount > 0 && (
+        <div className="flex flex-wrap items-center justify-between gap-3 rounded-xl border border-amber-500/30 bg-amber-950/20 p-3.5 text-xs text-amber-300">
+          <div className="flex items-center gap-2.5">
+            <WarningSvg className="size-5 shrink-0 text-amber-400" />
+            <div>
+              <p className="font-semibold">
+                未解決の画像が {missingCount} 件あります。
+              </p>
+              <p className="mt-0.5 text-amber-400/80">
+                ドキュメント内で参照されている画像が見つかりません。追加ドロップで補うことができます。
+              </p>
             </div>
-            {markdownFile.isSizeExceeded && (
-              <span className="shrink-0 rounded bg-red-900/60 px-2 py-0.5 text-[11px] font-medium text-red-300">
-                サイズ超過
-              </span>
-            )}
           </div>
-        ) : (
-          <div className="rounded-xl border border-dashed border-amber-500/40 bg-amber-950/10 p-4 text-xs text-amber-300">
-            Markdownファイル (.md)
-            が含まれていません。Markdownファイルをドロップしてください。
-          </div>
-        )}
-      </div>
-
-      {/* 添付アセット一覧 */}
-      {assetList.length > 0 && (
-        <div className="space-y-2">
-          <span className="text-xs font-semibold tracking-wider text-neutral-400 uppercase">
-            添付アセット画像 ({assetList.length}件)
-          </span>
-          <div className="max-h-60 space-y-1.5 overflow-y-auto pr-1">
-            {assetList.map((asset: VirtualFile) => (
-              <div
-                key={asset.relativePath}
-                className="flex items-center justify-between rounded-lg border border-neutral-800 bg-neutral-900/40 px-3 py-2 text-xs"
-              >
-                <div className="flex min-w-0 items-center gap-2.5">
-                  <div className="flex size-7 shrink-0 items-center justify-center rounded bg-neutral-800 text-neutral-400">
-                    <ImageSvg className="size-4" />
-                  </div>
-                  <span className="truncate font-mono text-neutral-300">
-                    {asset.relativePath}
-                  </span>
-                </div>
-                <div className="flex shrink-0 items-center gap-2 pl-2">
-                  <span className="font-mono text-neutral-500">
-                    {formatFileSize(asset.file.size)}
-                  </span>
-                  {asset.isSizeExceeded && (
-                    <span className="rounded bg-red-900/60 px-1.5 py-0.5 text-[10px] text-red-300">
-                      10MB超過
-                    </span>
-                  )}
-                  {asset.isTypeUnsupported && (
-                    <span className="rounded bg-amber-900/60 px-1.5 py-0.5 text-[10px] text-amber-300">
-                      非対応形式
-                    </span>
-                  )}
-                </div>
-              </div>
-            ))}
-          </div>
+          <button
+            type="button"
+            onClick={onOpenMissingModal}
+            className="shrink-0 rounded-lg bg-amber-500/20 px-3 py-1.5 text-xs font-semibold text-amber-200 transition-colors hover:bg-amber-500/30"
+          >
+            不足画像を追加する
+          </button>
         </div>
       )}
+
+      {/* タブコンテンツ */}
+      {activeTab === 'files' ? (
+        <div className="space-y-6">
+          {/* Markdownファイル表示 */}
+          <div className="space-y-2">
+            <span className="text-xs font-semibold tracking-wider text-neutral-400 uppercase">
+              Markdownドキュメント
+            </span>
+            {markdownFile ? (
+              <div className="flex items-center justify-between rounded-xl border border-blue-500/30 bg-blue-950/10 p-3.5 sm:p-4">
+                <div className="flex min-w-0 items-center gap-3">
+                  <div className="flex size-9 shrink-0 items-center justify-center rounded-lg bg-blue-600/20 text-blue-400">
+                    <FileDocumentSvg className="size-5" />
+                  </div>
+                  <div className="min-w-0 truncate">
+                    <p className="truncate text-sm font-semibold text-neutral-100">
+                      {markdownFile.relativePath}
+                    </p>
+                    <p className="text-xs text-neutral-400">
+                      {formatFileSize(markdownFile.file.size)}
+                      {title ? ` • タイトル: "${title}"` : ''}
+                    </p>
+                  </div>
+                </div>
+                {markdownFile.isSizeExceeded && (
+                  <span className="shrink-0 rounded bg-red-900/60 px-2 py-0.5 text-[11px] font-medium text-red-300">
+                    サイズ超過
+                  </span>
+                )}
+              </div>
+            ) : (
+              <div className="rounded-xl border border-dashed border-amber-500/40 bg-amber-950/10 p-4 text-xs text-amber-300">
+                Markdownファイル (.md)
+                が含まれていません。Markdownファイルをドロップしてください。
+              </div>
+            )}
+          </div>
+
+          {/* 添付アセット一覧 */}
+          {assetList.length > 0 && (
+            <div className="space-y-2">
+              <div className="flex items-center justify-between">
+                <span className="text-xs font-semibold tracking-wider text-neutral-400 uppercase">
+                  添付アセット画像 ({assetList.length}件)
+                </span>
+                {reconciliation && (
+                  <span className="text-[11px] text-neutral-400">
+                    解決済み: {reconciliation.totalResolvedCount}件 / 未参照:{' '}
+                    {reconciliation.unused.length}件
+                  </span>
+                )}
+              </div>
+
+              <div className="max-h-72 space-y-2 overflow-y-auto pr-1">
+                {assetList.map((asset: VirtualFile) => {
+                  const resolvedAsset = reconciliation?.resolved.get(
+                    asset.relativePath,
+                  );
+                  const isResolved = Boolean(resolvedAsset);
+                  const blobUrl = previewUrlMap.get(asset.relativePath);
+                  const isUnused = reconciliation?.unused.some(
+                    (u) => u.relativePath === asset.relativePath,
+                  );
+
+                  return (
+                    <div
+                      key={asset.relativePath}
+                      className="flex items-center justify-between rounded-lg border border-neutral-800 bg-neutral-900/40 p-2.5 text-xs transition-colors hover:border-neutral-700"
+                    >
+                      <div className="flex min-w-0 items-center gap-3">
+                        {/* サムネイルまたはアイコンプレビュー */}
+                        <div className="flex size-9 shrink-0 items-center justify-center overflow-hidden rounded bg-neutral-800 text-neutral-400">
+                          {blobUrl ? (
+                            <img
+                              src={blobUrl}
+                              alt={asset.relativePath}
+                              className="size-full object-cover"
+                            />
+                          ) : (
+                            <ImageSvg className="size-4" />
+                          )}
+                        </div>
+
+                        <div className="min-w-0">
+                          <p className="truncate font-mono text-neutral-200">
+                            {asset.relativePath}
+                          </p>
+                          <div className="flex items-center gap-2 text-[11px] text-neutral-500">
+                            <span>{formatFileSize(asset.file.size)}</span>
+                            {isResolved && (
+                              <span className="inline-flex items-center gap-1 text-emerald-400">
+                                <CheckSvg className="size-3" />
+                                <span>解決済み</span>
+                              </span>
+                            )}
+                            {isUnused && (
+                              <span className="text-neutral-500">
+                                (本文未参照・除外)
+                              </span>
+                            )}
+                          </div>
+                        </div>
+                      </div>
+
+                      <div className="flex shrink-0 items-center gap-2 pl-2">
+                        {asset.isSizeExceeded && (
+                          <span className="rounded bg-red-900/60 px-1.5 py-0.5 text-[10px] text-red-300">
+                            10MB超過
+                          </span>
+                        )}
+                        {asset.isTypeUnsupported && (
+                          <span className="rounded bg-amber-900/60 px-1.5 py-0.5 text-[10px] text-amber-300">
+                            非対応形式
+                          </span>
+                        )}
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+          )}
+        </div>
+      ) : (
+        /* ドキュメントプレビュータブ */
+        <MarkdownPreview
+          title={title}
+          ast={ast}
+          previewUrlMap={previewUrlMap}
+          missingPaths={missingPaths}
+        />
+      )}
+
+      {/* 未解決画像が存在する場合のエスケープハッチ */}
+      {missingCount > 0 && !hasInvalidFiles && (
+        <div className="flex items-center gap-2.5 rounded-lg border border-neutral-800 bg-neutral-900/50 p-3 text-xs text-neutral-300">
+          <input
+            id="allow-incomplete"
+            type="checkbox"
+            checked={allowIncompletePublish}
+            onChange={(e) => setAllowIncompletePublish(e.target.checked)}
+            className="size-4 rounded border-neutral-700 bg-neutral-800 text-blue-600 focus:ring-blue-500"
+          />
+          <label
+            htmlFor="allow-incomplete"
+            className="cursor-pointer text-neutral-300 select-none"
+          >
+            不足画像をリンク切れのまま公開することを許可する
+          </label>
+        </div>
+      )}
+
+      {/* 公開アクションエリア */}
+      <div className="flex flex-wrap items-center justify-between gap-4 border-t border-neutral-800 pt-5">
+        <div>
+          {!canPublish ? (
+            <p className="text-xs text-amber-400/90">
+              {markdownFile === null
+                ? 'Markdownファイルをドロップしてください。'
+                : missingCount > 0
+                  ? `未解決の画像が ${missingCount} 件残っています。不足ファイルを追加するか、そのまま公開にチェックを入れてください。`
+                  : hasInvalidFiles
+                    ? 'ファイルエラーを解消してください。'
+                    : 'ファイルを解決中...'}
+            </p>
+          ) : (
+            <p className="text-xs text-emerald-400">
+              {missingCount > 0
+                ? `未解決画像が ${missingCount} 件ありますが、公開準備が整いました。`
+                : 'すべての画像が正常に解決されました。公開可能です。'}
+            </p>
+          )}
+        </div>
+
+        <button
+          type="button"
+          disabled={!canPublish || isResolving}
+          onClick={onPublishClick}
+          className={`inline-flex items-center gap-2 rounded-xl px-5 py-2.5 text-sm font-semibold shadow-md transition-all ${
+            canPublish && !isResolving
+              ? 'cursor-pointer bg-blue-600 text-white hover:bg-blue-500 hover:shadow-blue-500/20 active:scale-98'
+              : 'cursor-not-allowed bg-neutral-800 text-neutral-500'
+          }`}
+        >
+          <span>
+            {missingCount > 0 && allowIncompletePublish
+              ? '未解決画像を残してWeb公開する'
+              : 'Web公開する'}
+          </span>
+        </button>
+      </div>
     </div>
   );
 }

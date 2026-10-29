@@ -6,3 +6,4 @@ export * from './types';
 export * from './path';
 export * from './traverse';
 export * from './parser';
+export * from './reconcile';

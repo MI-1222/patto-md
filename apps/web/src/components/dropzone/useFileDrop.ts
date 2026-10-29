@@ -127,6 +127,65 @@ async function scanEntry(
 }
 
 /**
+ * `DataTransfer` オブジェクトからファイル群を再帰走査して抽出する。
+ *
+ * @param dataTransfer - ドロップイベントの `DataTransfer`。
+ * @returns 抽出されたファイルリスト。
+ */
+export async function scanFilesFromDataTransfer(
+  dataTransfer: DataTransfer,
+): Promise<Array<{ file: File; relativePath: string }>> {
+  const items = dataTransfer.items;
+  if (items && items.length > 0) {
+    const scanPromises: Promise<Array<{ file: File; relativePath: string }>>[] =
+      [];
+
+    for (let i = 0; i < items.length; i++) {
+      const item = items[i];
+      const entry =
+        typeof item.webkitGetAsEntry === 'function'
+          ? (item.webkitGetAsEntry() as unknown as WebkitEntry)
+          : null;
+
+      if (entry) {
+        scanPromises.push(scanEntry(entry));
+      } else {
+        const file = item.getAsFile();
+        if (file) {
+          scanPromises.push(
+            Promise.resolve([{ file, relativePath: file.name }]),
+          );
+        }
+      }
+    }
+
+    const results = await Promise.all(scanPromises);
+    return results.flat();
+  }
+
+  // `items` が利用できない場合のフォールバック。
+  return Array.from(dataTransfer.files).map((file) => ({
+    file,
+    relativePath: file.name,
+  }));
+}
+
+/**
+ * `FileList` オブジェクトからファイル群を抽出する。
+ *
+ * @param files - `HTMLInputElement` の `FileList`。
+ * @returns 抽出されたファイルリスト。
+ */
+export function scanFilesFromFileList(
+  files: FileList,
+): Array<{ file: File; relativePath: string }> {
+  return Array.from(files).map((file) => {
+    const relativePath = file.webkitRelativePath || file.name;
+    return { file, relativePath };
+  });
+}
+
+/**
  * D&Dおよびファイル選択のイベント処理と状態管理を行うカスタムフック。
  *
  * @returns ドロップゾーン操作用ハンドラーおよび分類済みファイル群。
@@ -143,7 +202,7 @@ export function useFileDrop() {
 
   const dragCounterRef = useRef<number>(0);
 
-  /** 抽出された生ファイル群をパース・分類する。 */
+  /** 抽出された生ファイル群をパース・新規分類する。 */
   const processRawFiles = useCallback(
     (rawFiles: Array<{ file: File; relativePath: string }>) => {
       if (rawFiles.length === 0) {
@@ -193,6 +252,74 @@ export function useFileDrop() {
         totalSize: totalBytes,
         isTotalSizeExceeded: isTotalOver,
         hasInvalidFiles: hasError,
+      });
+
+      setStatus('ready');
+    },
+    [],
+  );
+
+  /**
+   * 既存のファイルを保持したまま、追加ドロップされたファイル群をマージする。
+   *
+   * @param additionalRawFiles - 追加された生ファイル一覧。
+   */
+  const appendRawFiles = useCallback(
+    (additionalRawFiles: Array<{ file: File; relativePath: string }>) => {
+      if (additionalRawFiles.length === 0) {
+        return;
+      }
+
+      setParsedFiles((prev) => {
+        let primaryMarkdown = prev.markdownFile;
+        const nextAssetMap = new Map(prev.assetFiles);
+
+        for (const item of additionalRawFiles) {
+          const { file, relativePath } = item;
+          const isSizeOver = file.size > MAX_SINGLE_FILE_SIZE;
+          const isMd = isMarkdownFile(file);
+          const isImg = isSupportedImage(file);
+          const isTypeUnsupported = !isMd && !isImg;
+
+          const virtualFile: VirtualFile = {
+            file,
+            relativePath,
+            isSizeExceeded: isSizeOver,
+            isTypeUnsupported,
+          };
+
+          if (isMd && !primaryMarkdown) {
+            primaryMarkdown = virtualFile;
+          } else if (!isMd) {
+            nextAssetMap.set(relativePath, virtualFile);
+          }
+        }
+
+        // 合計サイズおよびエラー状態の再計算。
+        let totalBytes = primaryMarkdown ? primaryMarkdown.file.size : 0;
+        let hasError = primaryMarkdown
+          ? primaryMarkdown.isSizeExceeded || primaryMarkdown.isTypeUnsupported
+          : false;
+
+        for (const asset of nextAssetMap.values()) {
+          totalBytes += asset.file.size;
+          if (asset.isSizeExceeded || asset.isTypeUnsupported) {
+            hasError = true;
+          }
+        }
+
+        const isTotalOver = totalBytes > MAX_TOTAL_FILE_SIZE;
+        if (isTotalOver) {
+          hasError = true;
+        }
+
+        return {
+          markdownFile: primaryMarkdown,
+          assetFiles: nextAssetMap,
+          totalSize: totalBytes,
+          isTotalSizeExceeded: isTotalOver,
+          hasInvalidFiles: hasError,
+        };
       });
 
       setStatus('ready');
@@ -257,41 +384,7 @@ export function useFileDrop() {
       e.stopPropagation();
       dragCounterRef.current = 0;
 
-      const items = e.dataTransfer.items;
-      if (items && items.length > 0) {
-        const scanPromises: Promise<
-          Array<{ file: File; relativePath: string }>
-        >[] = [];
-
-        for (let i = 0; i < items.length; i++) {
-          const item = items[i];
-          const entry =
-            typeof item.webkitGetAsEntry === 'function'
-              ? (item.webkitGetAsEntry() as unknown as WebkitEntry)
-              : null;
-
-          if (entry) {
-            scanPromises.push(scanEntry(entry));
-          } else {
-            const file = item.getAsFile();
-            if (file) {
-              scanPromises.push(
-                Promise.resolve([{ file, relativePath: file.name }]),
-              );
-            }
-          }
-        }
-
-        const results = await Promise.all(scanPromises);
-        processRawFiles(results.flat());
-        return;
-      }
-
-      // itemsが利用できないフォールバック処理。
-      const files = Array.from(e.dataTransfer.files).map((file) => ({
-        file,
-        relativePath: file.name,
-      }));
+      const files = await scanFilesFromDataTransfer(e.dataTransfer);
       processRawFiles(files);
     },
     [processRawFiles],
@@ -305,17 +398,37 @@ export function useFileDrop() {
         return;
       }
 
-      const fileList = Array.from(files).map((file) => {
-        // webkitRelativePath が存在する場合は相対パスを利用する。
-        const relativePath = file.webkitRelativePath || file.name;
-        return { file, relativePath };
-      });
-
+      const fileList = scanFilesFromFileList(files);
       processRawFiles(fileList);
-      // 同じファイルを再選択できるようにリセットする。
       e.target.value = '';
     },
     [processRawFiles],
+  );
+
+  /** 追加入力ドロップハンドラー。 */
+  const handleAppendDrop = useCallback(
+    async (e: React.DragEvent) => {
+      e.preventDefault();
+      e.stopPropagation();
+      const files = await scanFilesFromDataTransfer(e.dataTransfer);
+      appendRawFiles(files);
+    },
+    [appendRawFiles],
+  );
+
+  /** 追加入力ファイル選択ハンドラー。 */
+  const handleAppendFileInputChange = useCallback(
+    (e: React.ChangeEvent<HTMLInputElement>) => {
+      const files = e.target.files;
+      if (!files || files.length === 0) {
+        return;
+      }
+
+      const fileList = scanFilesFromFileList(files);
+      appendRawFiles(fileList);
+      e.target.value = '';
+    },
+    [appendRawFiles],
   );
 
   /** 選択状態をリセットする。 */
@@ -338,6 +451,9 @@ export function useFileDrop() {
     handleDragOver,
     handleDrop,
     handleFileInputChange,
+    handleAppendDrop,
+    handleAppendFileInputChange,
+    appendRawFiles,
     resetFiles,
   };
 }
