@@ -4,6 +4,7 @@
 export * from './types';
 export * from './useFileDrop';
 export * from './useMarkdownReconcile';
+export * from './useDocumentPublish';
 export * from './DropZone';
 export * from './SelectedFileList';
 export * from './MarkdownPreview';

@@ -1,15 +1,17 @@
 import { useState } from 'react';
 import { useFileDrop } from './useFileDrop';
 import { useMarkdownReconcile } from './useMarkdownReconcile';
+import { useDocumentPublish } from './useDocumentPublish';
 import { DropZone } from './DropZone';
 import { SelectedFileList } from './SelectedFileList';
 import { MissingAssetsModal } from './MissingAssetsModal';
 
 /**
- * 作成画面全体のファイル受付・状態管理コンテナコンポーネント。
- * Reactアイランドとして動作し、ブラウザイベント、AST解析、仮想ファイルマップ突合を管理する。
+ * 作成画面全体のファイル受付と状態管理を担うコンテナコンポーネント。
+ * Reactアイランドとして動作し、ブラウザイベント、AST解析、仮想ファイルマップ突合、
+ * およびDirect Uploadとコミット処理のパイプラインを統合管理する。
  *
- * @returns 作成画面UIコンテナ。
+ * @returns 作成画面のUIコンテナ。
  */
 export function DropZoneContainer() {
   const {
@@ -27,11 +29,21 @@ export function DropZoneContainer() {
 
   const {
     parseResult,
+    markdownContent,
     reconciliation,
     previewUrlMap,
     isResolving,
     isReadyToPublish,
   } = useMarkdownReconcile(parsedFiles);
+
+  const {
+    progressMessage,
+    progressPercent,
+    errorMessage: publishErrorMessage,
+    isPublishing,
+    publish,
+    resetPublishState,
+  } = useDocumentPublish();
 
   const [isMissingModalOpen, setIsMissingModalOpen] = useState(false);
 
@@ -40,6 +52,11 @@ export function DropZoneContainer() {
     (parsedFiles.markdownFile !== null || parsedFiles.assetFiles.size > 0);
 
   const missingAssets = reconciliation?.missing || [];
+
+  const handleReset = () => {
+    resetPublishState();
+    resetFiles();
+  };
 
   return (
     <div className="w-full">
@@ -62,24 +79,36 @@ export function DropZoneContainer() {
             title={parseResult?.title || null}
             isResolving={isResolving}
             isReadyToPublish={isReadyToPublish}
+            isPublishing={isPublishing}
+            progressMessage={progressMessage}
+            progressPercent={progressPercent}
+            publishErrorMessage={publishErrorMessage}
             onOpenMissingModal={() => setIsMissingModalOpen(true)}
-            onReset={resetFiles}
-            onPublishClick={() => {
-              // 将来実装予定のアップロードフロー。
+            onReset={handleReset}
+            onPublishClick={async ({ expiration, allowIncompletePublish }) => {
+              await publish({
+                parsedFiles,
+                reconciliation,
+                parseResult,
+                markdownContent,
+                expiration,
+                allowIncompletePublish,
+              });
             }}
           />
 
-          {/* 追加ドロップゾーン(インライン補足受付用) */}
-          <div className="pt-2">
-            <DropZone
-              status={status}
-              onDragEnter={handleDragEnter}
-              onDragLeave={handleDragLeave}
-              onDragOver={handleDragOver}
-              onDrop={handleAppendDrop}
-              onFileInputChange={handleAppendFileInputChange}
-            />
-          </div>
+          {!isPublishing && (
+            <div className="pt-2">
+              <DropZone
+                status={status}
+                onDragEnter={handleDragEnter}
+                onDragLeave={handleDragLeave}
+                onDragOver={handleDragOver}
+                onDrop={handleAppendDrop}
+                onFileInputChange={handleAppendFileInputChange}
+              />
+            </div>
+          )}
         </div>
       )}
 

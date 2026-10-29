@@ -1,12 +1,15 @@
 import { useState } from 'react';
 import type { Root } from 'mdast';
+import type { ExpirationPreset } from '@patto-md/shared';
 import {
   FileDocumentSvg,
   ImageSvg,
   CloseSvg,
   CheckSvg,
   WarningSvg,
+  SpinnerSvg,
 } from '../svg/FileIcons';
+import { PublishSvg } from '../svg/PublishIcon';
 import { MarkdownPreview } from './MarkdownPreview';
 import type { ParsedFiles, VirtualFile } from './types';
 import type { ReconciliationResult } from '../../lib/markdown';
@@ -29,6 +32,16 @@ function formatFileSize(bytes: number): string {
   return `${mb.toFixed(1)} MB`;
 }
 
+/**
+ * 有効期限プリセットの選択肢定義。
+ */
+const EXPIRATION_OPTIONS: { value: ExpirationPreset; label: string }[] = [
+  { value: '1day', label: '24時間' },
+  { value: '7days', label: '7日間 (推奨)' },
+  { value: '30days', label: '30日間' },
+  { value: 'never', label: '無期限' },
+];
+
 /** 選択済みファイル一覧プレビューコンポーネントのプロパティ定義。 */
 interface SelectedFileListProps {
   /** パース済みファイル群。 */
@@ -49,8 +62,19 @@ interface SelectedFileListProps {
   onOpenMissingModal: () => void;
   /** リセットハンドラー。 */
   onReset: () => void;
-  /** 公開ボタン押下ハンドラー(将来の実装用)。 */
-  onPublishClick?: () => void;
+  /** 公開処理の実行中フラグ。 */
+  isPublishing?: boolean;
+  /** 公開処理の進捗メッセージ。 */
+  progressMessage?: string;
+  /** 公開処理の進捗率 (0〜100)。 */
+  progressPercent?: number;
+  /** 公開処理のエラーメッセージ。 */
+  publishErrorMessage?: string | null;
+  /** 公開実行時のコールバック関数。 */
+  onPublishClick?: (options: {
+    expiration: ExpirationPreset;
+    allowIncompletePublish: boolean;
+  }) => void;
 }
 
 /**
@@ -66,9 +90,13 @@ export function SelectedFileList({
   ast,
   title,
   isResolving,
-  isReadyToPublish,
+  isReadyToPublish: _isReadyToPublish,
   onOpenMissingModal,
   onReset,
+  isPublishing = false,
+  progressMessage = '',
+  progressPercent = 0,
+  publishErrorMessage = null,
   onPublishClick,
 }: SelectedFileListProps) {
   const {
@@ -81,6 +109,7 @@ export function SelectedFileList({
 
   const [activeTab, setActiveTab] = useState<'files' | 'preview'>('files');
   const [allowIncompletePublish, setAllowIncompletePublish] = useState(false);
+  const [expiration, setExpiration] = useState<ExpirationPreset>('7days');
 
   const assetList = Array.from(assetFiles.values());
   const missingCount = reconciliation?.missing.length || 0;
@@ -88,12 +117,21 @@ export function SelectedFileList({
     reconciliation?.missing.map((m) => m.cleanPath) || [],
   );
 
-  // 公開可能判定: 基本条件 + (完全解決 または ユーザーによる不足容認)。
   const canPublish =
     markdownFile !== null &&
     !hasInvalidFiles &&
     reconciliation !== null &&
     (reconciliation.isComplete || allowIncompletePublish);
+
+  const handlePublish = () => {
+    if (!canPublish || isResolving || isPublishing) {
+      return;
+    }
+    onPublishClick?.({
+      expiration,
+      allowIncompletePublish,
+    });
+  };
 
   return (
     <div className="space-y-6">
@@ -123,6 +161,7 @@ export function SelectedFileList({
           <div className="flex rounded-lg border border-neutral-800 bg-neutral-950 p-0.5 text-xs">
             <button
               type="button"
+              disabled={isPublishing}
               onClick={() => setActiveTab('files')}
               className={`rounded-md px-3 py-1 font-medium transition-colors ${
                 activeTab === 'files'
@@ -134,6 +173,7 @@ export function SelectedFileList({
             </button>
             <button
               type="button"
+              disabled={isPublishing}
               onClick={() => setActiveTab('preview')}
               className={`rounded-md px-3 py-1 font-medium transition-colors ${
                 activeTab === 'preview'
@@ -147,8 +187,9 @@ export function SelectedFileList({
 
           <button
             type="button"
+            disabled={isPublishing}
             onClick={onReset}
-            className="inline-flex items-center gap-1.5 rounded-lg border border-neutral-700/80 bg-neutral-800/60 px-3 py-1.5 text-xs font-medium text-neutral-300 transition-colors hover:border-neutral-600 hover:bg-neutral-800 hover:text-neutral-100"
+            className="inline-flex items-center gap-1.5 rounded-lg border border-neutral-700/80 bg-neutral-800/60 px-3 py-1.5 text-xs font-medium text-neutral-300 transition-colors hover:border-neutral-600 hover:bg-neutral-800 hover:text-neutral-100 disabled:cursor-not-allowed disabled:opacity-50"
           >
             <CloseSvg className="size-3.5" />
             <span>選び直す</span>
@@ -193,8 +234,9 @@ export function SelectedFileList({
           </div>
           <button
             type="button"
+            disabled={isPublishing}
             onClick={onOpenMissingModal}
-            className="shrink-0 rounded-lg bg-amber-500/20 px-3 py-1.5 text-xs font-semibold text-amber-200 transition-colors hover:bg-amber-500/30"
+            className="shrink-0 rounded-lg bg-amber-500/20 px-3 py-1.5 text-xs font-semibold text-amber-200 transition-colors hover:bg-amber-500/30 disabled:cursor-not-allowed disabled:opacity-50"
           >
             不足画像を追加する
           </button>
@@ -340,9 +382,10 @@ export function SelectedFileList({
           <input
             id="allow-incomplete"
             type="checkbox"
+            disabled={isPublishing}
             checked={allowIncompletePublish}
             onChange={(e) => setAllowIncompletePublish(e.target.checked)}
-            className="size-4 rounded border-neutral-700 bg-neutral-800 text-blue-600 focus:ring-blue-500"
+            className="size-4 rounded border-neutral-700 bg-neutral-800 text-blue-600 focus:ring-blue-500 disabled:cursor-not-allowed disabled:opacity-50"
           />
           <label
             htmlFor="allow-incomplete"
@@ -353,10 +396,32 @@ export function SelectedFileList({
         </div>
       )}
 
+      {publishErrorMessage && (
+        <div className="rounded-xl border border-red-500/30 bg-red-950/20 p-3.5 text-xs text-red-300">
+          <p className="font-semibold">公開処理に失敗しました。</p>
+          <p className="mt-1 text-red-400">{publishErrorMessage}</p>
+        </div>
+      )}
+
       {/* 公開アクションエリア */}
-      <div className="flex flex-wrap items-center justify-between gap-4 border-t border-neutral-800 pt-5">
-        <div>
-          {!canPublish ? (
+      <div className="flex flex-col gap-4 border-t border-neutral-800 pt-5 sm:flex-row sm:items-center sm:justify-between">
+        <div className="min-w-0 flex-1">
+          {isPublishing ? (
+            <div className="space-y-1.5">
+              <div className="flex items-center justify-between text-xs text-neutral-300">
+                <span className="font-medium">{progressMessage}</span>
+                <span className="font-mono text-neutral-400">
+                  {progressPercent}%
+                </span>
+              </div>
+              <div className="h-1.5 w-full overflow-hidden rounded-full bg-neutral-800">
+                <div
+                  className="h-full bg-blue-500 transition-all duration-300 ease-out"
+                  style={{ width: `${progressPercent}%` }}
+                />
+              </div>
+            </div>
+          ) : !canPublish ? (
             <p className="text-xs text-amber-400/90">
               {markdownFile === null
                 ? 'Markdownファイルをドロップしてください。'
@@ -375,22 +440,58 @@ export function SelectedFileList({
           )}
         </div>
 
-        <button
-          type="button"
-          disabled={!canPublish || isResolving}
-          onClick={onPublishClick}
-          className={`inline-flex items-center gap-2 rounded-xl px-5 py-2.5 text-sm font-semibold shadow-md transition-all ${
-            canPublish && !isResolving
-              ? 'cursor-pointer bg-blue-600 text-white hover:bg-blue-500 hover:shadow-blue-500/20 active:scale-98'
-              : 'cursor-not-allowed bg-neutral-800 text-neutral-500'
-          }`}
-        >
-          <span>
-            {missingCount > 0 && allowIncompletePublish
-              ? '未解決画像を残してWeb公開する'
-              : 'Web公開する'}
-          </span>
-        </button>
+        <div className="flex shrink-0 items-center gap-3">
+          <div className="flex items-center gap-1.5">
+            <label
+              htmlFor="expiration-select"
+              className="text-xs text-neutral-400"
+            >
+              有効期限:
+            </label>
+            <select
+              id="expiration-select"
+              disabled={isPublishing}
+              value={expiration}
+              onChange={(e) =>
+                setExpiration(e.target.value as ExpirationPreset)
+              }
+              className="rounded-lg border border-neutral-700 bg-neutral-900 px-2.5 py-1.5 text-xs text-neutral-200 focus:border-blue-500 focus:ring-1 focus:ring-blue-500 focus:outline-none disabled:cursor-not-allowed disabled:opacity-50"
+            >
+              {EXPIRATION_OPTIONS.map((opt) => (
+                <option key={opt.value} value={opt.value}>
+                  {opt.label}
+                </option>
+              ))}
+            </select>
+          </div>
+
+          <button
+            type="button"
+            disabled={!canPublish || isResolving || isPublishing}
+            onClick={handlePublish}
+            className={`inline-flex items-center gap-2 rounded-xl px-5 py-2.5 text-sm font-semibold shadow-md transition-all ${
+              canPublish && !isResolving && !isPublishing
+                ? 'cursor-pointer bg-blue-600 text-white hover:bg-blue-500 hover:shadow-blue-500/20 active:scale-98'
+                : 'cursor-not-allowed bg-neutral-800 text-neutral-500'
+            }`}
+          >
+            {isPublishing ? (
+              <>
+                <SpinnerSvg className="size-4" />
+                <span>公開中...</span>
+              </>
+            ) : (
+              <>
+                <PublishSvg className="size-4" />
+                <span>
+                  {missingCount > 0 && allowIncompletePublish
+                    ? '未解決画像を残してWeb公開する'
+                    : 'Web公開する'}
+                </span>
+              </>
+            )}
+          </button>
+        </div>
       </div>
     </div>
   );
