@@ -1,27 +1,81 @@
 import { SHARED_MODULE_NAME } from '@patto-md/shared';
+import { Hono } from 'hono';
+import { cors } from 'hono/cors';
+import { logger } from 'hono/logger';
+import type { AppEnv } from './types';
+
+export * from './types';
 
 /**
- * Cloudflare Workers API のエントリーポイント。
+ * Hono アプリケーションインスタンスの初期化。
  */
-export default {
-  /**
-   * HTTPリクエストを処理するハンドラー関数。
-   *
-   * @param request - 受信したHTTPリクエスト。
-   * @returns レスポンスオブジェクト。
-   */
-  async fetch(request: Request): Promise<Response> {
-    const url = new URL(request.url);
+const app = new Hono<AppEnv>();
 
-    if (url.pathname === '/health') {
-      return new Response(
-        JSON.stringify({ status: 'ok', module: SHARED_MODULE_NAME }),
-        {
-          headers: { 'Content-Type': 'application/json' },
-        },
-      );
-    }
+// アクセスログ出力ミドルウェアの登録。
+app.use('*', logger());
 
-    return new Response('Not Found', { status: 404 });
-  },
-};
+// CORS(Cross-Origin Resource Sharing)ミドルウェアの設定。
+app.use('*', async (c, next) => {
+  const allowedOrigins = ['http://localhost:4321', 'http://127.0.0.1:4321'];
+
+  if (c.env.FRONTEND_ORIGIN) {
+    allowedOrigins.push(c.env.FRONTEND_ORIGIN);
+  }
+
+  const corsMiddleware = cors({
+    origin: (origin) =>
+      allowedOrigins.includes(origin) ? origin : allowedOrigins[0],
+    allowMethods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
+    allowHeaders: ['Content-Type', 'Authorization'],
+    maxAge: 86400,
+  });
+
+  return corsMiddleware(c, next);
+});
+
+// 未検出ルートのハンドリング。
+app.notFound((c) => {
+  return c.json(
+    {
+      error: {
+        message: 'Not Found',
+      },
+    },
+    404,
+  );
+});
+
+// グローバルエラーハンドリング。
+app.onError((error, c) => {
+  console.error('Unhandled API Error:', error);
+  return c.json(
+    {
+      error: {
+        message: 'Internal Server Error',
+      },
+    },
+    500,
+  );
+});
+
+/**
+ * サービスヘルスチェックエンドポイント。
+ */
+app.get('/health', (c) => {
+  return c.json({
+    status: 'ok',
+    module: SHARED_MODULE_NAME,
+  });
+});
+
+/**
+ * APIルート経由のヘルスチェックエンドポイント。
+ */
+app.get('/api/health', (c) => {
+  return c.json({
+    status: 'ok',
+    module: SHARED_MODULE_NAME,
+  });
+});
+
+export default app;
