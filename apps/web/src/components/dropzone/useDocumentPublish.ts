@@ -123,6 +123,8 @@ export function useDocumentPublish(): UseDocumentPublishReturn {
           },
         });
 
+        // 公開成功確定後は離脱防止アラートを即座に解除する。
+        isPublishingRef.current = false;
         setStatus('completed');
         setProgressPercent(100);
         setProgressMessage('ドキュメントの公開に成功。');
