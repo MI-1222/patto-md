@@ -4,6 +4,11 @@
   "main": "src/index.ts",
   "compatibility_date": "2025-02-24",
   "compatibility_flags": ["nodejs_compat"],
+  // 本番環境変数定義。
+  "vars": {
+    "ENVIRONMENT": "production",
+    "R2_BUCKET_NAME": "patto-md-r2"
+  },
   // D1 データベースのバインディング定義。
   "d1_databases": [
     {
