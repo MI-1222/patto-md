@@ -1,0 +1,42 @@
+name: CI
+
+on:
+  push:
+    branches:
+      - main
+  pull_request:
+    branches:
+      - main
+
+jobs:
+  check:
+    name: Lint, Typecheck, Test, and Build
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: リポジトリのチェックアウト。
+        uses: actions/checkout@v4
+
+      - name: pnpm のセットアップ。
+        uses: pnpm/action-setup@v4
+
+      - name: Node.js のセットアップ。
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: 'pnpm'
+
+      - name: 依存関係のインストール。
+        run: pnpm install --frozen-lockfile
+
+      - name: コード静的解析 (ESLint)。
+        run: pnpm run lint
+
+      - name: 型チェック (TypeScript)。
+        run: pnpm run typecheck
+
+      - name: 単体テスト実行 (Vitest / Node Test)。
+        run: pnpm run test
+
+      - name: プロジェクトビルド検証。
+        run: pnpm run build

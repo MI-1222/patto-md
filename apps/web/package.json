@@ -8,7 +8,7 @@
     "build": "ASTRO_TELEMETRY_DISABLED=1 astro build",
     "deploy": "wrangler deploy",
     "preview": "wrangler pages dev dist --compatibility-date=2025-02-24 --compatibility-flags=nodejs_compat",
-    "typecheck": "tsc --noEmit",
+    "typecheck": "ASTRO_TELEMETRY_DISABLED=1 astro sync && tsc --noEmit",
     "test": "vitest run"
   },
   "dependencies": {
