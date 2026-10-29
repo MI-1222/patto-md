@@ -8,7 +8,11 @@
 /* eslint-disable astro/no-set-html-directive */
 import BaseLayout from '../../layouts/BaseLayout.astro';
 import { SLUG_PATTERN } from '@patto-md/shared';
-import { fetchDocument, resolveServerApiBaseUrl } from '../../lib/api';
+import {
+  fetchDocument,
+  getFetcher,
+  resolveServerApiBaseUrl,
+} from '../../lib/api';
 import { renderMarkdown, extractDescription } from '../../lib/markdown';
 import { DocumentActionBar } from '../../components/viewer';
 
@@ -20,10 +24,12 @@ if (!id || !SLUG_PATTERN.test(id)) {
 
 /** サーバーサイド実行時に解決されたAPIベースURL。 */
 const apiBaseUrl = resolveServerApiBaseUrl(Astro.locals);
+/** サーバーサイド実行時に解決されたFetcher(Service Binding優先)。 */
+const fetcher = getFetcher(Astro.locals);
 
 let docData;
 try {
-  docData = await fetchDocument(id, apiBaseUrl);
+  docData = await fetchDocument(id, apiBaseUrl, fetcher);
 } catch (error) {
   console.error('SSR fetchDocument エラー:', error);
   return Astro.redirect('/404');

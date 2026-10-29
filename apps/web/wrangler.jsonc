@@ -7,6 +7,12 @@
   "vars": {
     "PUBLIC_API_URL": "https://patto-md-api.mi-1222.workers.dev"
   },
+  "services": [
+    {
+      "binding": "API",
+      "service": "patto-md-api"
+    }
+  ],
   "assets": {
     "binding": "ASSETS",
     "directory": "./dist"

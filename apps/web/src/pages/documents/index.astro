@@ -6,12 +6,18 @@
  * クライアント側React Islandでタブ切り替えやページネーションを提供する。
  */
 import BaseLayout from '../../layouts/BaseLayout.astro';
-import { fetchDocuments, resolveServerApiBaseUrl } from '../../lib/api';
+import {
+  fetchDocuments,
+  getFetcher,
+  resolveServerApiBaseUrl,
+} from '../../lib/api';
 import { DocumentListContainer } from '../../components/documents';
 import type { DocumentListResponse } from '@patto-md/shared';
 
 /** サーバーサイド実行時に解決されたAPIベースURL。 */
 const apiBaseUrl = resolveServerApiBaseUrl(Astro.locals);
+/** サーバーサイド実行時に解決されたFetcher(Service Binding優先)。 */
+const fetcher = getFetcher(Astro.locals);
 
 /** SSR時に取得したドキュメント一覧の初期データ。 */
 let initialData: DocumentListResponse = {
@@ -27,6 +33,7 @@ try {
     page: 1,
     limit: 12,
     baseUrl: apiBaseUrl,
+    customFetch: fetcher,
   });
   initialData = result.data;
 

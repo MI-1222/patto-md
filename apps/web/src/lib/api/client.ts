@@ -63,6 +63,27 @@ export function resolveServerApiBaseUrl(locals?: unknown): string {
 }
 
 /**
+ * Astro locals から Cloudflare Service Binding (`API`) の Fetcher 関数を取得する。
+ * Service Binding が存在する場合は内部高速通信用の fetch を返し、
+ * 存在しない環境(ローカル開発・テスト等)では標準のグローバル `fetch` を返す。
+ *
+ * @param locals - Astro の `locals` オブジェクト。
+ * @returns リクエスト送信用の fetch 関数。
+ */
+export function getFetcher(locals?: unknown): typeof fetch {
+  const service = (
+    locals as
+      { runtime?: { env?: { API?: { fetch: typeof fetch } } } } | undefined
+  )?.runtime?.env?.API;
+
+  if (service && typeof service.fetch === 'function') {
+    return service.fetch.bind(service);
+  }
+
+  return fetch;
+}
+
+/**
  * API通信時のエラーを表現するクラス。
  */
 export class ApiError extends Error {
@@ -221,18 +242,20 @@ export interface FetchDocumentResult {
  *
  * @param id - ドキュメントID(Slug)。
  * @param baseUrl - 接続先APIのベースURL。未指定時は `getApiBaseUrl()` の戻り値を使用する。
+ * @param customFetch - リクエスト送信に使用するカスタム fetch 関数(Service Binding 等)。
  * @returns ドキュメント詳細および `Cache-Control` ヘッダー値を含むオブジェクト。
  */
 export async function fetchDocument(
   id: string,
   baseUrl: string = getApiBaseUrl(),
+  customFetch: typeof fetch = fetch,
 ): Promise<FetchDocumentResult> {
   /** ドキュメント詳細取得APIのエンドポイントURL。 */
   const url = `${baseUrl}/api/documents/${id}`;
 
   let response: Response;
   try {
-    response = await fetch(url, {
+    response = await customFetch(url, {
       method: 'GET',
     });
   } catch (error) {
@@ -281,6 +304,8 @@ export interface FetchDocumentsParams {
   ids?: string[];
   /** 接続先APIのベースURL。 */
   baseUrl?: string;
+  /** リクエスト送信に使用するカスタム fetch 関数(Service Binding 等)。 */
+  customFetch?: typeof fetch;
 }
 
 /** ドキュメント一覧取得結果の型定義。 */
@@ -300,7 +325,13 @@ export interface FetchDocumentsResult {
 export async function fetchDocuments(
   params: FetchDocumentsParams = {},
 ): Promise<FetchDocumentsResult> {
-  const { page, limit, ids, baseUrl = getApiBaseUrl() } = params;
+  const {
+    page,
+    limit,
+    ids,
+    baseUrl = getApiBaseUrl(),
+    customFetch = fetch,
+  } = params;
 
   const query = new URLSearchParams();
   if (page !== undefined && page > 0) {
@@ -319,7 +350,7 @@ export async function fetchDocuments(
 
   let response: Response;
   try {
-    response = await fetch(url, {
+    response = await customFetch(url, {
       method: 'GET',
     });
   } catch (error) {

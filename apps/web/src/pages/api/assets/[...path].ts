@@ -1,5 +1,5 @@
 import type { APIRoute } from 'astro';
-import { resolveServerApiBaseUrl } from '../../../lib/api';
+import { getFetcher, resolveServerApiBaseUrl } from '../../../lib/api';
 
 /**
  * アセット配信用リバースプロキシエンドポイント。
@@ -18,11 +18,13 @@ export const GET: APIRoute = async ({ params, locals }) => {
 
   /** 解決されたAPIベースURL。 */
   const apiBaseUrl = resolveServerApiBaseUrl(locals);
+  /** 解決されたFetcher(Service Binding優先)。 */
+  const fetcher = getFetcher(locals);
   /** バックエンドAPIのアセット取得エンドポイントURL。 */
   const targetUrl = `${apiBaseUrl}/api/assets/${assetPath}`;
 
   try {
-    const apiResponse = await fetch(targetUrl);
+    const apiResponse = await fetcher(targetUrl);
 
     if (!apiResponse.ok) {
       return new Response(apiResponse.body, {
