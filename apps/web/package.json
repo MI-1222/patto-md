@@ -13,9 +13,11 @@
     "@astrojs/cloudflare": "^12.2.0",
     "@astrojs/react": "^4.2.0",
     "@patto-md/shared": "workspace:*",
+    "@tailwindcss/vite": "^4.3.3",
     "astro": "^5.3.0",
     "react": "^19.0.0",
-    "react-dom": "^19.0.0"
+    "react-dom": "^19.0.0",
+    "tailwindcss": "^4.3.3"
   },
   "devDependencies": {
     "@types/react": "^19.0.10",

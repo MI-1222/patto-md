@@ -1,4 +1,6 @@
+import path from 'node:path';
 import eslintPluginAstro from 'eslint-plugin-astro';
+import eslintPluginTailwindcss from 'eslint-plugin-tailwindcss';
 import tseslint from 'typescript-eslint';
 
 export default [
@@ -18,6 +20,24 @@ export default [
 
   // Astroの推奨ルール。
   ...eslintPluginAstro.configs.recommended,
+
+  // Tailwind CSSの推奨ルール。
+  {
+    ...eslintPluginTailwindcss.configs.recommended,
+    files: ['apps/web/**/*.{js,mjs,cjs,ts,jsx,tsx,astro}'],
+    settings: {
+      tailwindcss: {
+        cssConfigPath: path.resolve('apps/web/src/styles/global.css'),
+      },
+    },
+    rules: {
+      ...eslintPluginTailwindcss.configs.recommended.rules,
+      // クラス名の並び順はPrettierプラグイン(prettier-plugin-tailwindcss)に委ねるため無効化。
+      'tailwindcss/classnames-order': 'off',
+      // AstroのスコープドCSSクラスとの併用を許容するため無効化。
+      'tailwindcss/no-custom-classname': 'off',
+    },
+  },
 
   {
     rules: {
