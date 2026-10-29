@@ -70,4 +70,12 @@ export default [
       'no-console': ['warn', { allow: ['warn', 'error'] }],
     },
   },
+
+  // CLI スクリプト用の設定 (標準出力を許可)。
+  {
+    files: ['apps/api/scripts/**/*.{js,mjs,cjs,ts}'],
+    rules: {
+      'no-console': 'off',
+    },
+  },
 ];
