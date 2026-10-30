@@ -184,6 +184,8 @@ describe('APIクライアント(src/lib/api/client.ts)', () => {
         id: 'AbCdEf123456',
         url: '/p/AbCdEf123456',
         title: 'テスト文書',
+        editToken: 'pt_edt_0123456789abcdef0123456789abcdef0123456789a',
+        modifyToken: 'pt_mod_0123456789abcdef0123456789abcdef0123456789a',
         expiresAt: '2026-11-05T00:00:00.000Z',
         createdAt: '2026-10-29T00:00:00.000Z',
       };

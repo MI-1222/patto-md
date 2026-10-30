@@ -1,6 +1,6 @@
 /**
- * スキーマモジュールのエクスポート集約。
+ * バリデーションスキーマのエクスポート集約。
  */
 
-export * from './upload';
-export * from './document';
+export * from './upload.ts';
+export * from './document.ts';

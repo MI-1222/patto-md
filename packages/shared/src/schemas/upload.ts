@@ -3,7 +3,7 @@ import {
   ALLOWED_MIME_TYPES,
   MAX_SINGLE_FILE_SIZE,
   MAX_TOTAL_FILE_SIZE,
-} from '../constants/limits';
+} from '../constants/limits.ts';
 
 /** アップロード署名要求における単一ファイルのバリデーションスキーマ。 */
 export const uploadSignFileItemSchema = z.object({

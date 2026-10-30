@@ -127,6 +127,8 @@ describe('Direct Uploadとコミットパイプラインの統合フロー検証
             id: 'testSlug123',
             url: '/p/testSlug123',
             title: commitBody.title,
+            editToken: 'pt_edt_0123456789abcdef0123456789abcdef0123456789a',
+            modifyToken: 'pt_mod_0123456789abcdef0123456789abcdef0123456789a',
             expiresAt: '2026-11-05T00:00:00.000Z',
             createdAt: '2026-10-29T00:00:00.000Z',
           };

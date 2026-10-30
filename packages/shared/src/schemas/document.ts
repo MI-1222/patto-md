@@ -5,7 +5,11 @@ import {
   MAX_TITLE_LENGTH,
   MIN_TITLE_LENGTH,
   SLUG_PATTERN,
-} from '../constants/limits';
+} from '../constants/limits.ts';
+import {
+  EDIT_TOKEN_PATTERN,
+  MODIFY_TOKEN_PATTERN,
+} from '../constants/tokens.ts';
 
 /** ドキュメントコミット要求に含まれる添付ファイルのメタデータスキーマ。 */
 export const documentAttachmentCommitSchema = z.object({
@@ -70,7 +74,7 @@ export const documentCommitRequestSchema = z.object({
 /** ドキュメント確定コミット要求の型。 */
 export type DocumentCommitRequest = z.infer<typeof documentCommitRequestSchema>;
 
-/** ドキュメント確定コミットレスポンス(POST /api/documents)のスキーマ。 */
+/** ドキュメント確定コミットレスポンス(`POST /api/documents`)のスキーマ。 */
 export const documentCommitResponseSchema = z.object({
   /** 発行されたドキュメントID(Slug)。 */
   id: z.string().regex(SLUG_PATTERN, '無効なSlug形式である。'),
@@ -81,7 +85,17 @@ export const documentCommitResponseSchema = z.object({
   /** ドキュメントのタイトル。 */
   title: z.string(),
 
-  /** 有効期限日時(ISO 8601文字列、無期限時はnull)。 */
+  /** 特権操作(削除・設定変更・所有権移譲)用トークン。 */
+  editToken: z
+    .string()
+    .regex(EDIT_TOKEN_PATTERN, '無効なEdit Token形式である。'),
+
+  /** 本文更新専用トークン。 */
+  modifyToken: z
+    .string()
+    .regex(MODIFY_TOKEN_PATTERN, '無効なModify Token形式である。'),
+
+  /** 有効期限日時(ISO 8601文字列、無期限時は `null`)。 */
   expiresAt: z.string().datetime().nullable(),
 
   /** 作成日時(ISO 8601文字列)。 */

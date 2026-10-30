@@ -10,7 +10,11 @@
     ".": "./src/index.ts",
     "./constants": "./src/constants/index.ts",
     "./constants/turnstile": "./src/constants/turnstile.ts",
-    "./constants/limits": "./src/constants/limits.ts"
+    "./constants/limits": "./src/constants/limits.ts",
+    "./constants/tokens": "./src/constants/tokens.ts",
+    "./utils": "./src/utils/index.ts",
+    "./utils/token": "./src/utils/token.ts",
+    "./*": "./src/*"
   },
   "scripts": {
     "typecheck": "tsc --noEmit"

@@ -1,6 +1,4 @@
-/**
- * D1データベースのエンティティ型定義。
- */
+/** D1データベースのエンティティ型定義。 */
 
 /** ドキュメントの公開状態を表すステータス型。 */
 export type DocumentStatus = 'published' | 'expired' | 'deleted' | 'suspended';
@@ -11,7 +9,7 @@ export type DocumentVisibility = 'public' | 'unlisted' | 'protected';
 /** ドキュメント所有者のOAuth認証プロバイダ種別。 */
 export type OwnerProvider = 'discord' | 'github';
 
-/** D1 documents テーブルのレコード型。 */
+/** D1 `documents` テーブルのレコード型。 */
 export interface DocumentRecord {
   /** 公開用Slug(NanoID 12文字)。 */
   id: string;
@@ -28,13 +26,13 @@ export interface DocumentRecord {
   /** ドキュメントの公開ステータス。 */
   status: DocumentStatus;
 
-  /** 有効期限日時(ISO 8601文字列、nullの場合は無期限)。 */
+  /** 有効期限日時(ISO 8601文字列、`null` の場合は無期限)。 */
   expires_at: string | null;
 
-  /** 特権操作(削除・設定変更・所有権移譲)用トークンのSHA-256ハッシュ値。 */
+  /** 特権操作(削除・設定変更・所有権移譲)用トークンの `SHA-256` ハッシュ値。 */
   edit_token_hash: string | null;
 
-  /** 本文更新専用トークンのSHA-256ハッシュ値。 */
+  /** 本文更新専用トークンの `SHA-256` ハッシュ値。 */
   modify_token_hash: string | null;
 
   /** OAuth連携後の所有者ユーザー識別子。 */
@@ -56,7 +54,7 @@ export interface DocumentRecord {
   updated_at: string;
 }
 
-/** D1 attachments テーブルのレコード型。 */
+/** D1 `attachments` テーブルのレコード型。 */
 export interface AttachmentRecord {
   /** 添付ファイルの一意識別子(UUID)。 */
   id: string;
@@ -80,7 +78,7 @@ export interface AttachmentRecord {
   created_at: string;
 }
 
-/** D1 abuse_reports テーブルのレコード型。 */
+/** D1 `abuse_reports` テーブルのレコード型。 */
 export interface AbuseReportRecord {
   /** 通報レコードの一意識別子(自動採番)。 */
   id: number;

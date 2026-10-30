@@ -1,5 +1,7 @@
 import {
   documentCommitRequestSchema,
+  generateCapabilityToken,
+  hashToken,
   RATE_LIMIT_DOCUMENT_COMMIT_LIMIT,
   RATE_LIMIT_DOCUMENT_COMMIT_WINDOW_SECONDS,
   type AttachmentRecord,
@@ -162,6 +164,13 @@ documentsRouter.post(
     const updatedAt = createdAt;
     const expiresAt = calculateExpiresAt(expiration, new Date(createdAt));
 
+    const editToken = generateCapabilityToken('edit');
+    const modifyToken = generateCapabilityToken('modify');
+    const [editTokenHash, modifyTokenHash] = await Promise.all([
+      hashToken(editToken),
+      hashToken(modifyToken),
+    ]);
+
     // D1へのアトミックコミット(主キー衝突時は最大3回リトライ)。
     const maxRetries = 3;
     let committedSlug: string | null = null;
@@ -179,15 +188,19 @@ documentsRouter.post(
         content_r2_key,
         status,
         expires_at,
+        edit_token_hash,
+        modify_token_hash,
         created_at,
         updated_at
-      ) VALUES (?, ?, ?, ?, 'published', ?, ?, ?)`,
+      ) VALUES (?, ?, ?, ?, 'published', ?, ?, ?, ?, ?)`,
       ).bind(
         candidateSlug,
         title,
         description ?? null,
         contentR2Key,
         expiresAt,
+        editTokenHash,
+        modifyTokenHash,
         createdAt,
         updatedAt,
       );
@@ -261,11 +274,12 @@ documentsRouter.post(
       );
     }
 
-    // 確定コミットレスポンスの形成。
     const responsePayload: DocumentCommitResponse = {
       id: committedSlug,
       url: `/p/${committedSlug}`,
       title,
+      editToken,
+      modifyToken,
       expiresAt,
       createdAt,
     };
