@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useState, useRef } from 'react';
 import type { Root } from 'mdast';
 import type { ExpirationPreset } from '@patto-md/shared';
 import {
@@ -11,6 +11,7 @@ import {
 } from '../svg/FileIcons';
 import { PublishSvg } from '../svg/PublishIcon';
 import { MarkdownPreview } from './MarkdownPreview';
+import { TurnstileWidget, type TurnstileWidgetHandle } from '../turnstile';
 import type { ParsedFiles, VirtualFile } from './types';
 import type { ReconciliationResult } from '../../lib/markdown';
 
@@ -74,6 +75,7 @@ interface SelectedFileListProps {
   onPublishClick?: (options: {
     expiration: ExpirationPreset;
     allowIncompletePublish: boolean;
+    turnstileToken?: string;
   }) => void;
 }
 
@@ -110,6 +112,8 @@ export function SelectedFileList({
   const [activeTab, setActiveTab] = useState<'files' | 'preview'>('files');
   const [allowIncompletePublish, setAllowIncompletePublish] = useState(false);
   const [expiration, setExpiration] = useState<ExpirationPreset>('7days');
+  const [turnstileToken, setTurnstileToken] = useState<string | null>(null);
+  const turnstileRef = useRef<TurnstileWidgetHandle>(null);
 
   const assetList = Array.from(assetFiles.values());
   const missingCount = reconciliation?.missing.length || 0;
@@ -117,19 +121,33 @@ export function SelectedFileList({
     reconciliation?.missing.map((m) => m.cleanPath) || [],
   );
 
-  const canPublish =
+  /** ファイル構成要件(Markdown存在、制約違反なし、画像突合完了または未解決許容)の充足判定。 */
+  const isFilesReady =
     markdownFile !== null &&
     !hasInvalidFiles &&
     reconciliation !== null &&
     (reconciliation.isComplete || allowIncompletePublish);
 
+  /** ボット検証トークンを含めた最終的な公開可否判定。 */
+  const canPublish = isFilesReady && Boolean(turnstileToken);
+
+  /**
+   * 公開処理を実行する。
+   * トークン消費後のリトライに備えてウィジェットを即座にリセットし、親の公開処理を呼び出す。
+   */
   const handlePublish = () => {
     if (!canPublish || isResolving || isPublishing) {
       return;
     }
+
+    const currentToken = turnstileToken;
+    setTurnstileToken(null);
+    turnstileRef.current?.reset();
+
     onPublishClick?.({
       expiration,
       allowIncompletePublish,
+      turnstileToken: currentToken || undefined,
     });
   };
 
@@ -403,6 +421,23 @@ export function SelectedFileList({
         </div>
       )}
 
+      <div className="flex justify-center border-t border-neutral-800/60 pt-4">
+        <TurnstileWidget
+          ref={turnstileRef}
+          theme="dark"
+          size="flexible"
+          onSuccess={(token) => {
+            setTurnstileToken(token);
+          }}
+          onExpire={() => {
+            setTurnstileToken(null);
+          }}
+          onError={() => {
+            setTurnstileToken(null);
+          }}
+        />
+      </div>
+
       {/* 公開アクションエリア */}
       <div className="flex flex-col gap-4 border-t border-neutral-800 pt-5 sm:flex-row sm:items-center sm:justify-between">
         <div className="min-w-0 flex-1">
@@ -425,11 +460,13 @@ export function SelectedFileList({
             <p className="text-xs text-amber-400/90">
               {markdownFile === null
                 ? 'Markdownファイルをドロップしてください。'
-                : missingCount > 0
+                : missingCount > 0 && !allowIncompletePublish
                   ? `未解決の画像が ${missingCount} 件残っています。不足ファイルを追加するか、そのまま公開にチェックを入れてください。`
                   : hasInvalidFiles
                     ? 'ファイルエラーを解消してください。'
-                    : 'ファイルを解決中...'}
+                    : isFilesReady && !turnstileToken
+                      ? 'ボット検証(認証)を行っています...'
+                      : 'ファイルを解決中...'}
             </p>
           ) : (
             <p className="text-xs text-emerald-400">
@@ -479,6 +516,11 @@ export function SelectedFileList({
               <>
                 <SpinnerSvg className="size-4" />
                 <span>公開中...</span>
+              </>
+            ) : isFilesReady && !turnstileToken ? (
+              <>
+                <SpinnerSvg className="size-4 animate-spin text-neutral-400" />
+                <span>認証中...</span>
               </>
             ) : (
               <>

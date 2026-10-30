@@ -5,6 +5,7 @@ import {
 } from '@patto-md/shared';
 import { Hono } from 'hono';
 import { createPresignedPutUrl, generateR2Key } from '../lib/r2';
+import { createTurnstileMiddleware } from '../middlewares/turnstile';
 import type { AppEnv } from '../types';
 
 /** ファイルアップロード関連のサブルーター。 */
@@ -16,7 +17,7 @@ export const uploadRouter = new Hono<AppEnv>();
  * クライアントから受け取ったファイルメタデータを検証し、
  * ブラウザからR2へ直接PUTするための短命な署名付きURLを発行する。
  */
-uploadRouter.post('/sign', async (c) => {
+uploadRouter.post('/sign', createTurnstileMiddleware(), async (c) => {
   let rawBody: unknown;
   try {
     rawBody = await c.req.json();

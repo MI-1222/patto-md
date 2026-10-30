@@ -85,7 +85,11 @@ export function DropZoneContainer() {
             publishErrorMessage={publishErrorMessage}
             onOpenMissingModal={() => setIsMissingModalOpen(true)}
             onReset={handleReset}
-            onPublishClick={async ({ expiration, allowIncompletePublish }) => {
+            onPublishClick={async ({
+              expiration,
+              allowIncompletePublish,
+              turnstileToken,
+            }) => {
               await publish({
                 parsedFiles,
                 reconciliation,
@@ -93,6 +97,7 @@ export function DropZoneContainer() {
                 markdownContent,
                 expiration,
                 allowIncompletePublish,
+                turnstileToken,
               });
             }}
           />

@@ -2,9 +2,16 @@
   "name": "@patto-md/shared",
   "version": "0.0.1",
   "private": true,
+  "type": "module",
   "sideEffects": false,
   "main": "./src/index.ts",
   "types": "./src/index.ts",
+  "exports": {
+    ".": "./src/index.ts",
+    "./constants": "./src/constants/index.ts",
+    "./constants/turnstile": "./src/constants/turnstile.ts",
+    "./constants/limits": "./src/constants/limits.ts"
+  },
   "scripts": {
     "typecheck": "tsc --noEmit"
   },

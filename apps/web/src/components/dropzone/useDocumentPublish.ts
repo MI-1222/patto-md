@@ -37,6 +37,8 @@ export interface PublishParams {
   expiration: ExpirationPreset;
   /** 未解決画像のリンク切れ公開を容認するかどうかの真偽値。 */
   allowIncompletePublish?: boolean;
+  /** Cloudflare Turnstile ボット検証トークン。 */
+  turnstileToken?: string;
   /** 公開成功時のコールバック関数。指定時は自動遷移を行わずに呼び出す。 */
   onSuccess?: (response: DocumentCommitResponse) => void;
 }

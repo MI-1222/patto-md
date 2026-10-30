@@ -7,6 +7,7 @@ interface Env {
 	R2_SECRET_ACCESS_KEY: string;
 	R2_BUCKET_NAME: string;
 	FRONTEND_ORIGIN: string;
+	TURNSTILE_SECRET_KEY: string;
 	BUCKET: R2Bucket;
 	DB: D1Database;
 }

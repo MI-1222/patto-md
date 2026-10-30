@@ -31,3 +31,9 @@ R2_BUCKET_NAME="patto-md-r2"
 # CORS (Cross-Origin Resource Sharing) で許可する Web アプリケーションのオリジン URL。
 # ローカル開発時は Astro の開発サーバー (http://localhost:4321) を指定する。
 FRONTEND_ORIGIN="http://localhost:4321"
+
+# Cloudflare Turnstile シークレットキー:
+# ボット防御用の Turnstile Siteverify API (https://challenges.cloudflare.com/turnstile/v0/siteverify)
+# でトークンを検証するためのシークレットキー。
+# ローカル開発・テスト時は Cloudflare 公式の Always Pass ダミーキーを使用する。
+TURNSTILE_SECRET_KEY="1x0000000000000000000000000000000AA"

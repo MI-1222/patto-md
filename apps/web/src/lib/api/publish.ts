@@ -48,6 +48,8 @@ export interface ExecutePublishPipelineParams {
   expiration: ExpirationPreset;
   /** 未解決画像のリンク切れ公開を容認するかどうかの真偽値。 */
   allowIncompletePublish?: boolean;
+  /** Cloudflare Turnstile ボット検証トークン。 */
+  turnstileToken?: string;
   /** 接続先APIベースURL。 */
   baseUrl?: string;
   /** 進捗コールバックハンドラー。 */
@@ -113,6 +115,7 @@ export async function executePublishPipeline(
     markdownContent,
     expiration,
     allowIncompletePublish = false,
+    turnstileToken,
     baseUrl,
     onProgress,
   } = params;
@@ -170,7 +173,11 @@ export async function executePublishPipeline(
     },
   ];
 
-  const signResponse = await requestUploadSign(fileSignItems, baseUrl);
+  const signResponse = await requestUploadSign(
+    fileSignItems,
+    baseUrl,
+    turnstileToken,
+  );
   const signedFiles = signResponse.files;
 
   const markdownSign = signedFiles[signedFiles.length - 1];

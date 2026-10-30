@@ -78,6 +78,49 @@ describe('APIクライアント(src/lib/api/client.ts)', () => {
       expect(result).toEqual(mockResponse);
     });
 
+    it('Turnstile トークンが渡された場合、署名APIのリクエストヘッダーに付与して送信する。', async () => {
+      const mockResponse: UploadSignResponse = {
+        files: [
+          {
+            fileId: 'mock-uuid-1',
+            fileName: 'test.png',
+            r2Key: 'temp/uploads/mock-uuid-1/test.png',
+            uploadUrl: 'https://r2.example.com/put-url',
+          },
+        ],
+      };
+
+      const fetchMock = vi.fn().mockResolvedValue({
+        ok: true,
+        status: 200,
+        json: async () => mockResponse,
+      } as Response);
+      globalThis.fetch = fetchMock;
+
+      const items: UploadSignFileItem[] = [
+        { name: 'test.png', size: 1024, type: 'image/png' },
+      ];
+
+      const result = await requestUploadSign(
+        items,
+        'http://localhost:8787',
+        'dummy-turnstile-token',
+      );
+
+      expect(fetchMock).toHaveBeenCalledWith(
+        'http://localhost:8787/api/upload/sign',
+        {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'x-turnstile-token': 'dummy-turnstile-token',
+          },
+          body: JSON.stringify({ files: items }),
+        },
+      );
+      expect(result).toEqual(mockResponse);
+    });
+
     it('APIエラー時に適切なエラーメッセージを持ったApiErrorをthrowする。', async () => {
       globalThis.fetch = vi.fn().mockResolvedValue({
         ok: false,

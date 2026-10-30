@@ -1,10 +1,11 @@
-import type {
-  DocumentCommitRequest,
-  DocumentCommitResponse,
-  DocumentListResponse,
-  DocumentResponse,
-  UploadSignFileItem,
-  UploadSignResponse,
+import {
+  TURNSTILE_TOKEN_HEADER,
+  type DocumentCommitRequest,
+  type DocumentCommitResponse,
+  type DocumentListResponse,
+  type DocumentResponse,
+  type UploadSignFileItem,
+  type UploadSignResponse,
 } from '@patto-md/shared';
 
 /**
@@ -105,21 +106,28 @@ export class ApiError extends Error {
  *
  * @param files - 署名を要求するファイル一覧。
  * @param baseUrl - 接続先APIベースURL。未指定時は `getApiBaseUrl()` を使用する。
+ * @param turnstileToken - Cloudflare Turnstile ボット検証トークン。
  * @returns 署名発行レスポンス。
  */
 export async function requestUploadSign(
   files: UploadSignFileItem[],
   baseUrl: string = getApiBaseUrl(),
+  turnstileToken?: string,
 ): Promise<UploadSignResponse> {
   const url = `${baseUrl}/api/upload/sign`;
+
+  const headers: Record<string, string> = {
+    'Content-Type': 'application/json',
+  };
+  if (turnstileToken && turnstileToken.trim().length > 0) {
+    headers[TURNSTILE_TOKEN_HEADER] = turnstileToken;
+  }
 
   let response: Response;
   try {
     response = await fetch(url, {
       method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-      },
+      headers,
       body: JSON.stringify({ files }),
     });
   } catch (error) {
@@ -195,13 +203,15 @@ export async function commitDocument(
 ): Promise<DocumentCommitResponse> {
   const url = `${baseUrl}/api/documents`;
 
+  const headers: Record<string, string> = {
+    'Content-Type': 'application/json',
+  };
+
   let response: Response;
   try {
     response = await fetch(url, {
       method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-      },
+      headers,
       body: JSON.stringify(payload),
     });
   } catch (error) {
