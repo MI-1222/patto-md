@@ -76,6 +76,24 @@ export const RATE_LIMIT_DOCUMENT_COMMIT_LIMIT = 3;
 /** ドキュメントコミットAPIのレートリミットウィンドウ秒数(1分)。 */
 export const RATE_LIMIT_DOCUMENT_COMMIT_WINDOW_SECONDS = 60;
 
+/** ドキュメント更新APIのレートリミット上限(1分あたりの最大リクエスト数)。 */
+export const RATE_LIMIT_DOCUMENT_UPDATE_LIMIT = 5;
+
+/** ドキュメント更新APIのレートリミットウィンドウ秒数(1分)。 */
+export const RATE_LIMIT_DOCUMENT_UPDATE_WINDOW_SECONDS = 60;
+
+/** ドキュメント削除APIのレートリミット上限(1分あたりの最大リクエスト数)。 */
+export const RATE_LIMIT_DOCUMENT_DELETE_LIMIT = 5;
+
+/** ドキュメント削除APIのレートリミットウィンドウ秒数(1分)。 */
+export const RATE_LIMIT_DOCUMENT_DELETE_WINDOW_SECONDS = 60;
+
+/** ドキュメント再公開・有効期限延長APIのレートリミット上限(1分あたりの最大リクエスト数)。 */
+export const RATE_LIMIT_DOCUMENT_RENEW_LIMIT = 5;
+
+/** ドキュメント再公開・有効期限延長APIのレートリミットウィンドウ秒数(1分)。 */
+export const RATE_LIMIT_DOCUMENT_RENEW_WINDOW_SECONDS = 60;
+
 /** レートリミット超過時の既定エラーメッセージ。 */
 export const RATE_LIMIT_EXCEEDED_MESSAGE =
   'リクエスト回数の上限を超えました。しばらく待ってから再試行してください。';

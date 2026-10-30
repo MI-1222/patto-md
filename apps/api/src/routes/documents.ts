@@ -1,23 +1,36 @@
 import {
   documentCommitRequestSchema,
+  documentRenewRequestSchema,
+  documentUpdateRequestSchema,
   generateCapabilityToken,
   hashToken,
   RATE_LIMIT_DOCUMENT_COMMIT_LIMIT,
   RATE_LIMIT_DOCUMENT_COMMIT_WINDOW_SECONDS,
+  RATE_LIMIT_DOCUMENT_DELETE_LIMIT,
+  RATE_LIMIT_DOCUMENT_DELETE_WINDOW_SECONDS,
+  RATE_LIMIT_DOCUMENT_RENEW_LIMIT,
+  RATE_LIMIT_DOCUMENT_RENEW_WINDOW_SECONDS,
+  RATE_LIMIT_DOCUMENT_UPDATE_LIMIT,
+  RATE_LIMIT_DOCUMENT_UPDATE_WINDOW_SECONDS,
   type AttachmentRecord,
   type DocumentCommitResponse,
+  type DocumentDeleteResponse,
   type DocumentListItem,
   type DocumentListResponse,
   type DocumentRecord,
+  type DocumentRenewResponse,
   type DocumentResponse,
+  type DocumentUpdateResponse,
   SLUG_PATTERN,
+  z,
 } from '@patto-md/shared';
 import { Hono } from 'hono';
-import { calculateDocumentCacheControl } from '../lib/cache';
-import { calculateExpiresAt } from '../lib/date';
-import { checkR2ObjectExists, getR2Text, isValidR2Key } from '../lib/r2';
-import { generateSlug } from '../lib/slug';
-import { createRateLimitMiddleware } from '../middlewares/rate-limit';
+import { calculateDocumentCacheControl } from '../lib/cache.ts';
+import { calculateExpiresAt } from '../lib/date.ts';
+import { checkR2ObjectExists, getR2Text, isValidR2Key } from '../lib/r2.ts';
+import { generateSlug } from '../lib/slug.ts';
+import { createDocumentAuthMiddleware } from '../middlewares/auth.ts';
+import { createRateLimitMiddleware } from '../middlewares/rate-limit.ts';
 import type { AppEnv } from '../types';
 
 /** ドキュメント管理関連のサブルーター。 */
@@ -59,7 +72,7 @@ documentsRouter.post(
         {
           error: {
             message: 'ドキュメント情報の検証に失敗しました。',
-            details: parseResult.error.flatten(),
+            details: z.flattenError(parseResult.error),
           },
         },
         400,
@@ -581,3 +594,334 @@ documentsRouter.get('/:id', async (c) => {
 
   return c.json(responsePayload, 200);
 });
+
+/**
+ * ドキュメント本文およびメタデータの更新エンドポイント(`PUT /api/documents/:id`)。
+ *
+ * `modify` または `edit` のケイパビリティトークン保持者のみ実行可能。
+ * 本文用R2キーおよび添付アセットの実体存在を確認した上で、
+ * D1の `documents` レコード更新および`attachments` レコード群の入れ替えをアトミックに実行する。
+ * 更新完了後は `Cache-Control: no-store` を返却する。
+ */
+documentsRouter.put(
+  '/:id',
+  createRateLimitMiddleware({
+    action: 'document-update',
+    limit: RATE_LIMIT_DOCUMENT_UPDATE_LIMIT,
+    windowSeconds: RATE_LIMIT_DOCUMENT_UPDATE_WINDOW_SECONDS,
+  }),
+  createDocumentAuthMiddleware('modify'),
+  async (c) => {
+    const authDoc = c.get('authDoc')!;
+    const id = authDoc.id;
+
+    let rawBody: unknown;
+    try {
+      rawBody = await c.req.json();
+    } catch {
+      return c.json(
+        {
+          error: {
+            message: '不正なJSON形式のリクエスト。',
+          },
+        },
+        400,
+      );
+    }
+
+    const parsed = documentUpdateRequestSchema.safeParse(rawBody);
+    if (!parsed.success) {
+      return c.json(
+        {
+          error: {
+            message: 'リクエストパラメータの検証に失敗しました。',
+            details: z.flattenError(parsed.error),
+          },
+        },
+        400,
+      );
+    }
+
+    const { title, description, contentR2Key, attachments } = parsed.data;
+
+    if (!isValidR2Key(contentR2Key)) {
+      return c.json(
+        {
+          error: {
+            message: '無効な本文R2オブジェクトキーです。',
+          },
+        },
+        400,
+      );
+    }
+
+    for (const attachment of attachments) {
+      if (!isValidR2Key(attachment.r2Key)) {
+        return c.json(
+          {
+            error: {
+              message: `無効な添付ファイルR2オブジェクトキーです: ${attachment.fileName}`,
+            },
+          },
+          400,
+        );
+      }
+    }
+
+    const r2Creds = {
+      accountId: c.env.CLOUDFLARE_ACCOUNT_ID,
+      accessKeyId: c.env.R2_ACCESS_KEY_ID,
+      secretAccessKey: c.env.R2_SECRET_ACCESS_KEY,
+      bucketName: c.env.R2_BUCKET_NAME,
+    };
+
+    const contentExists = await checkR2ObjectExists(
+      c.env.BUCKET,
+      contentR2Key,
+      r2Creds,
+    );
+    if (!contentExists) {
+      return c.json(
+        {
+          error: {
+            message: '指定された本文ファイルがストレージに存在しません。',
+          },
+        },
+        400,
+      );
+    }
+
+    if (attachments.length > 0) {
+      const checkResults = await Promise.all(
+        attachments.map(async (attachment) => {
+          const exists = await checkR2ObjectExists(
+            c.env.BUCKET,
+            attachment.r2Key,
+            r2Creds,
+          );
+          return {
+            fileName: attachment.fileName,
+            exists,
+          };
+        }),
+      );
+
+      const missingAttachment = checkResults.find((result) => !result.exists);
+      if (missingAttachment) {
+        return c.json(
+          {
+            error: {
+              message: `指定された添付ファイルがストレージに存在しません: ${missingAttachment.fileName}`,
+            },
+          },
+          400,
+        );
+      }
+    }
+
+    const updatedAt = new Date().toISOString();
+
+    const documentStatement = c.env.DB.prepare(
+      `UPDATE documents
+      SET title = ?,
+          description = ?,
+          content_r2_key = ?,
+          updated_at = ?
+      WHERE id = ?`,
+    ).bind(title, description ?? null, contentR2Key, updatedAt, id);
+
+    const deleteAttachmentsStatement = c.env.DB.prepare(
+      `DELETE FROM attachments WHERE document_id = ?`,
+    ).bind(id);
+
+    const insertAttachmentStatements = attachments.map((att) => {
+      return c.env.DB.prepare(
+        `INSERT INTO attachments (
+          id,
+          document_id,
+          file_name,
+          file_size,
+          mime_type,
+          r2_key,
+          created_at
+        ) VALUES (?, ?, ?, ?, ?, ?, ?)`,
+      ).bind(
+        att.id,
+        id,
+        att.fileName,
+        att.fileSize,
+        att.mimeType,
+        att.r2Key,
+        updatedAt,
+      );
+    });
+
+    try {
+      await c.env.DB.batch([
+        documentStatement,
+        deleteAttachmentsStatement,
+        ...insertAttachmentStatements,
+      ]);
+    } catch (error) {
+      console.error('D1ドキュメント更新エラー:', error);
+      return c.json(
+        {
+          error: {
+            message: 'データベースの更新に失敗しました。',
+          },
+        },
+        500,
+      );
+    }
+
+    c.header('Cache-Control', 'no-store');
+
+    const responsePayload: DocumentUpdateResponse = {
+      id,
+      url: `/p/${id}`,
+      title,
+      description: description ?? null,
+      expiresAt: authDoc.expires_at,
+      createdAt: authDoc.created_at,
+      updatedAt,
+    };
+
+    return c.json(responsePayload, 200);
+  },
+);
+
+/**
+ * ドキュメント削除エンドポイント(`DELETE /api/documents/:id`)。
+ *
+ * 特権 `edit` トークン保持者のみ実行可能。
+ * 対象レコードを `status = 'deleted'` に更新する論理削除を行い、以降の閲覧・更新を遮断する。
+ */
+documentsRouter.delete(
+  '/:id',
+  createRateLimitMiddleware({
+    action: 'document-delete',
+    limit: RATE_LIMIT_DOCUMENT_DELETE_LIMIT,
+    windowSeconds: RATE_LIMIT_DOCUMENT_DELETE_WINDOW_SECONDS,
+  }),
+  createDocumentAuthMiddleware('edit'),
+  async (c) => {
+    const authDoc = c.get('authDoc')!;
+    const id = authDoc.id;
+    const updatedAt = new Date().toISOString();
+
+    try {
+      await c.env.DB.prepare(
+        `UPDATE documents
+        SET status = 'deleted',
+            updated_at = ?
+        WHERE id = ?`,
+      )
+        .bind(updatedAt, id)
+        .run();
+    } catch (error) {
+      console.error('D1ドキュメント削除エラー:', error);
+      return c.json(
+        {
+          error: {
+            message: 'データベースの更新に失敗しました。',
+          },
+        },
+        500,
+      );
+    }
+
+    c.header('Cache-Control', 'no-store');
+
+    const responsePayload: DocumentDeleteResponse = {
+      success: true,
+      id,
+    };
+
+    return c.json(responsePayload, 200);
+  },
+);
+
+/**
+ * ドキュメント再公開および有効期限延長エンドポイント(`POST /api/documents/:id/renew`)。
+ *
+ * 特権 `edit` トークン保持者のみ実行可能。
+ * 現在時刻を起点に指定プリセットから有効期限を再計算し、`status = 'published'` に復帰させる。
+ */
+documentsRouter.post(
+  '/:id/renew',
+  createRateLimitMiddleware({
+    action: 'document-renew',
+    limit: RATE_LIMIT_DOCUMENT_RENEW_LIMIT,
+    windowSeconds: RATE_LIMIT_DOCUMENT_RENEW_WINDOW_SECONDS,
+  }),
+  createDocumentAuthMiddleware('edit'),
+  async (c) => {
+    const authDoc = c.get('authDoc')!;
+    const id = authDoc.id;
+
+    let rawBody: unknown;
+    try {
+      rawBody = await c.req.json();
+    } catch {
+      return c.json(
+        {
+          error: {
+            message: '不正なJSON形式のリクエスト。',
+          },
+        },
+        400,
+      );
+    }
+
+    const parsed = documentRenewRequestSchema.safeParse(rawBody);
+    if (!parsed.success) {
+      return c.json(
+        {
+          error: {
+            message: 'リクエストパラメータの検証に失敗しました。',
+            details: z.flattenError(parsed.error),
+          },
+        },
+        400,
+      );
+    }
+
+    const { expiration } = parsed.data;
+    const now = new Date();
+    const newExpiresAt = calculateExpiresAt(expiration, now);
+    const updatedAt = now.toISOString();
+
+    try {
+      await c.env.DB.prepare(
+        `UPDATE documents
+        SET expires_at = ?,
+            status = 'published',
+            updated_at = ?
+        WHERE id = ?`,
+      )
+        .bind(newExpiresAt, updatedAt, id)
+        .run();
+    } catch (error) {
+      console.error('D1ドキュメント有効期限更新エラー:', error);
+      return c.json(
+        {
+          error: {
+            message: 'データベースの更新に失敗しました。',
+          },
+        },
+        500,
+      );
+    }
+
+    c.header('Cache-Control', 'no-store');
+
+    const responsePayload: DocumentRenewResponse = {
+      id,
+      url: `/p/${id}`,
+      expiresAt: newExpiresAt,
+      updatedAt,
+    };
+
+    return c.json(responsePayload, 200);
+  },
+);

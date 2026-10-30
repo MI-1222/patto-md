@@ -3,6 +3,7 @@ import {
   EXPIRATION_PRESETS,
   MAX_SINGLE_FILE_SIZE,
   MAX_TITLE_LENGTH,
+  MAX_TOTAL_FILE_SIZE,
   MIN_TITLE_LENGTH,
   SLUG_PATTERN,
 } from '../constants/limits.ts';
@@ -181,3 +182,120 @@ export const documentListResponseSchema = z.object({
 
 /** ドキュメント一覧取得レスポンスの型。 */
 export type DocumentListResponse = z.infer<typeof documentListResponseSchema>;
+
+/**
+ * ドキュメント更新要求(`PUT /api/documents/:id`)のバリデーションスキーマ。
+ * 本文ファイルサイズは署名要求時に検証済みのため、本スキーマでは添付ファイルの合計サイズ上限(30MB)を検証する。
+ */
+export const documentUpdateRequestSchema = z
+  .object({
+    /** ドキュメントのタイトル。 */
+    title: z
+      .string()
+      .trim()
+      .min(MIN_TITLE_LENGTH, 'タイトルは必須である。')
+      .max(
+        MAX_TITLE_LENGTH,
+        `タイトルは${MAX_TITLE_LENGTH}文字以下である必要がある。`,
+      ),
+
+    /** 本文の要約・抜粋テキスト(任意)。 */
+    description: z
+      .string()
+      .max(500, '抜粋は500文字以下である必要がある。')
+      .optional(),
+
+    /** R2にアップロード済みのMarkdown本文オブジェクトキー。 */
+    contentR2Key: z.string().min(1, '本文のR2キーは必須である。'),
+
+    /** ドキュメントに紐づく添付ファイル情報の一覧。 */
+    attachments: z.array(documentAttachmentCommitSchema).default([]),
+  })
+  .refine(
+    (data) => {
+      const totalSize = data.attachments.reduce(
+        (sum, item) => sum + item.fileSize,
+        0,
+      );
+      return totalSize <= MAX_TOTAL_FILE_SIZE;
+    },
+    {
+      message: '添付ファイルの合計サイズが上限を超過している。',
+      path: ['attachments'],
+    },
+  );
+
+/** ドキュメント更新要求の型。 */
+export type DocumentUpdateRequest = z.infer<typeof documentUpdateRequestSchema>;
+
+/** ドキュメント更新レスポンス(`PUT /api/documents/:id`)のスキーマ。 */
+export const documentUpdateResponseSchema = z.object({
+  /** ドキュメントID(`Slug`)。 */
+  id: z.string(),
+
+  /** 公開パーマリンクURLまたはパス。 */
+  url: z.string(),
+
+  /** ドキュメントのタイトル。 */
+  title: z.string(),
+
+  /** 本文の要約・抜粋テキスト(`null` の場合は未設定)。 */
+  description: z.string().nullable(),
+
+  /** 有効期限日時(ISO 8601文字列、無期限時は `null`)。 */
+  expiresAt: z.string().datetime().nullable(),
+
+  /** 作成日時(ISO 8601文字列)。 */
+  createdAt: z.string().datetime(),
+
+  /** 最終更新日時(ISO 8601文字列)。 */
+  updatedAt: z.string().datetime(),
+});
+
+/** ドキュメント更新レスポンスの型。 */
+export type DocumentUpdateResponse = z.infer<
+  typeof documentUpdateResponseSchema
+>;
+
+/** ドキュメント再公開・有効期限延長要求(`POST /api/documents/:id/renew`)のスキーマ。 */
+export const documentRenewRequestSchema = z.object({
+  /** 新しい有効期限プリセット指定。 */
+  expiration: z.enum(EXPIRATION_PRESETS, {
+    error: '無効な有効期限指定である。',
+  }),
+});
+
+/** ドキュメント再公開・有効期限延長要求の型。 */
+export type DocumentRenewRequest = z.infer<typeof documentRenewRequestSchema>;
+
+/** ドキュメント再公開・有効期限延長レスポンス(`POST /api/documents/:id/renew`)のスキーマ。 */
+export const documentRenewResponseSchema = z.object({
+  /** ドキュメントID(`Slug`)。 */
+  id: z.string(),
+
+  /** 公開パーマリンクURLまたはパス。 */
+  url: z.string(),
+
+  /** 更新後の有効期限日時(ISO 8601文字列、無期限時は `null`)。 */
+  expiresAt: z.string().datetime().nullable(),
+
+  /** 最終更新日時(ISO 8601文字列)。 */
+  updatedAt: z.string().datetime(),
+});
+
+/** ドキュメント再公開・有効期限延長レスポンスの型。 */
+export type DocumentRenewResponse = z.infer<typeof documentRenewResponseSchema>;
+
+/** ドキュメント削除レスポンス(`DELETE /api/documents/:id`)のスキーマ。 */
+export const documentDeleteResponseSchema = z.object({
+  /** 削除成功フラグ。 */
+  success: z.boolean(),
+
+  /** 削除されたドキュメントID(`Slug`)。 */
+  id: z.string(),
+});
+
+/** ドキュメント削除レスポンスの型。 */
+export type DocumentDeleteResponse = z.infer<
+  typeof documentDeleteResponseSchema
+>;

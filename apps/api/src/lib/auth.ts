@@ -31,6 +31,11 @@ export function extractBearerToken(authHeader?: string | null): string | null {
  * ドキュメント操作に必要なケイパビリティ権限を検証する Hono ミドルウェアを生成する。
  *
  * `Authorization: Bearer <token>` ヘッダーおよび URL パラメータ `:id` を検証し、D1 レコードと照合する。
+ *
+ * 対象レコードが存在しない場合や論理削除済み(`status = 'deleted'`)の場合は 404、
+ * 規約違反通報により凍結済み(`status = 'suspended'`)の場合は 403 を返却して処理を遮断する。
+ *
+ * 対象レコードが存在しない場合や論理削除済み(`status = 'deleted'`)の場合は 404、規約違反通報により凍結済み(`status = 'suspended'`)の場合は 403 を返却して処理を遮断する。
  * 特権トークン(`edit`)はすべての操作を認可し、更新トークン(`modify`)は本文更新権限要求時のみ認可する。
  * 認可成功時はコンテキスト変数へ `authDoc` と `tokenRole` を格納する。
  *
@@ -125,6 +130,17 @@ export function createDocumentAuthMiddleware(
           },
         },
         404,
+      );
+    }
+
+    if (doc.status === 'suspended') {
+      return c.json(
+        {
+          error: {
+            message: '規約違反の通報により凍結されています。',
+          },
+        },
+        403,
       );
     }
 

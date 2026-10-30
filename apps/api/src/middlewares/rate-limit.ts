@@ -1,2 +1,2 @@
 /** エッジレートリミットミドルウェアの再エクスポート。 */
-export * from '../lib/rate-limit';
+export * from '../lib/rate-limit.ts';

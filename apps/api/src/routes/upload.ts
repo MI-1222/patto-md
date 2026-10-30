@@ -4,6 +4,7 @@ import {
   uploadSignRequestSchema,
   type UploadSignFileResponseItem,
   type UploadSignResponse,
+  z,
 } from '@patto-md/shared';
 import { Hono } from 'hono';
 import { createPresignedPutUrl, generateR2Key } from '../lib/r2';
@@ -51,7 +52,7 @@ uploadRouter.post(
         {
           error: {
             message: 'ファイルメタデータの検証に失敗しました。',
-            details: parseResult.error.flatten(),
+            details: z.flattenError(parseResult.error),
           },
         },
         400,
