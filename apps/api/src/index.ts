@@ -30,6 +30,15 @@ app.use(
       'X-Turnstile-Token',
       'cf-turnstile-response',
     ],
+    exposeHeaders: [
+      'Retry-After',
+      'RateLimit-Limit',
+      'RateLimit-Remaining',
+      'RateLimit-Reset',
+      'X-RateLimit-Limit',
+      'X-RateLimit-Remaining',
+      'X-RateLimit-Reset',
+    ],
     maxAge: 86400,
   }),
 );

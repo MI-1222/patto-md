@@ -1,5 +1,7 @@
 import {
   documentCommitRequestSchema,
+  RATE_LIMIT_DOCUMENT_COMMIT_LIMIT,
+  RATE_LIMIT_DOCUMENT_COMMIT_WINDOW_SECONDS,
   type AttachmentRecord,
   type DocumentCommitResponse,
   type DocumentListItem,
@@ -13,6 +15,7 @@ import { calculateDocumentCacheControl } from '../lib/cache';
 import { calculateExpiresAt } from '../lib/date';
 import { checkR2ObjectExists, getR2Text, isValidR2Key } from '../lib/r2';
 import { generateSlug } from '../lib/slug';
+import { createRateLimitMiddleware } from '../middlewares/rate-limit';
 import type { AppEnv } from '../types';
 
 /** ドキュメント管理関連のサブルーター。 */
@@ -21,147 +24,155 @@ export const documentsRouter = new Hono<AppEnv>();
 /**
  * ドキュメントコミットエンドポイント。
  *
- * R2への直接アップロード完了後、メタデータと添付ファイル情報をD1へアトミックに永続化し、
- * 公開用のドキュメントSlugおよびパーマリンクを発行する。
+ * R2 への直接アップロード完了後、メタデータと添付ファイル情報を D1 へアトミックに永続化し、
+ * 公開用のドキュメント Slug およびパーマリンクを発行する。
+ * 1分あたり最大3リクエストのレートリミットを適用する。
  */
-documentsRouter.post('/', async (c) => {
-  let rawBody: unknown;
-  try {
-    rawBody = await c.req.json();
-  } catch {
-    return c.json(
-      {
-        error: {
-          message: '不正なJSON形式のリクエスト。',
-        },
-      },
-      400,
-    );
-  }
-
-  // Zodスキーマによるリクエストボディの検証。
-  const parseResult = documentCommitRequestSchema.safeParse(rawBody);
-  if (!parseResult.success) {
-    return c.json(
-      {
-        error: {
-          message: 'ドキュメント情報の検証に失敗しました。',
-          details: parseResult.error.flatten(),
-        },
-      },
-      400,
-    );
-  }
-
-  const { title, description, contentR2Key, attachments, expiration } =
-    parseResult.data;
-
-  // R2オブジェクトキーの形式およびパストラバーサル検証。
-  if (!isValidR2Key(contentR2Key)) {
-    return c.json(
-      {
-        error: {
-          message: '不正な本文ストレージキーが指定されました。',
-        },
-      },
-      400,
-    );
-  }
-
-  for (const attachment of attachments) {
-    if (!isValidR2Key(attachment.r2Key)) {
+documentsRouter.post(
+  '/',
+  createRateLimitMiddleware({
+    action: 'document-commit',
+    limit: RATE_LIMIT_DOCUMENT_COMMIT_LIMIT,
+    windowSeconds: RATE_LIMIT_DOCUMENT_COMMIT_WINDOW_SECONDS,
+  }),
+  async (c) => {
+    let rawBody: unknown;
+    try {
+      rawBody = await c.req.json();
+    } catch {
       return c.json(
         {
           error: {
-            message: `添付ファイル「${attachment.fileName}」のストレージキーが不正です。`,
-          },
-        },
-        400,
-      );
-    }
-  }
-
-  const r2Creds = {
-    accountId: c.env.CLOUDFLARE_ACCOUNT_ID,
-    accessKeyId: c.env.R2_ACCESS_KEY_ID,
-    secretAccessKey: c.env.R2_SECRET_ACCESS_KEY,
-    bucketName: c.env.R2_BUCKET_NAME,
-  };
-
-  // R2上のMarkdown本文実体の存在確認(ローカル開発時S3フォールバック対応)。
-  try {
-    const contentExists = await checkR2ObjectExists(
-      c.env.BUCKET,
-      contentR2Key,
-      r2Creds,
-    );
-    if (!contentExists) {
-      return c.json(
-        {
-          error: {
-            message: '指定された本文ファイルがストレージ上に存在しません。',
+            message: '不正なJSON形式のリクエスト。',
           },
         },
         400,
       );
     }
 
-    // 添付ファイル群の実体存在確認。
-    if (attachments.length > 0) {
-      const checkResults = await Promise.all(
-        attachments.map(async (attachment) => {
-          const exists = await checkR2ObjectExists(
-            c.env.BUCKET,
-            attachment.r2Key,
-            r2Creds,
-          );
-          return {
-            fileName: attachment.fileName,
-            exists,
-          };
-        }),
+    // Zodスキーマによるリクエストボディの検証。
+    const parseResult = documentCommitRequestSchema.safeParse(rawBody);
+    if (!parseResult.success) {
+      return c.json(
+        {
+          error: {
+            message: 'ドキュメント情報の検証に失敗しました。',
+            details: parseResult.error.flatten(),
+          },
+        },
+        400,
       );
+    }
 
-      const missingAttachment = checkResults.find((result) => !result.exists);
-      if (missingAttachment) {
+    const { title, description, contentR2Key, attachments, expiration } =
+      parseResult.data;
+
+    // R2オブジェクトキーの形式およびパストラバーサル検証。
+    if (!isValidR2Key(contentR2Key)) {
+      return c.json(
+        {
+          error: {
+            message: '不正な本文ストレージキーが指定されました。',
+          },
+        },
+        400,
+      );
+    }
+
+    for (const attachment of attachments) {
+      if (!isValidR2Key(attachment.r2Key)) {
         return c.json(
           {
             error: {
-              message: `添付ファイル「${missingAttachment.fileName}」がストレージ上に存在しません。`,
+              message: `添付ファイル「${attachment.fileName}」のストレージキーが不正です。`,
             },
           },
           400,
         );
       }
     }
-  } catch (error) {
-    console.error('R2オブジェクト存在確認エラー:', error);
-    return c.json(
-      {
-        error: {
-          message: 'ストレージの検証中にエラーが発生しました。',
+
+    const r2Creds = {
+      accountId: c.env.CLOUDFLARE_ACCOUNT_ID,
+      accessKeyId: c.env.R2_ACCESS_KEY_ID,
+      secretAccessKey: c.env.R2_SECRET_ACCESS_KEY,
+      bucketName: c.env.R2_BUCKET_NAME,
+    };
+
+    // R2上のMarkdown本文実体の存在確認(ローカル開発時S3フォールバック対応)。
+    try {
+      const contentExists = await checkR2ObjectExists(
+        c.env.BUCKET,
+        contentR2Key,
+        r2Creds,
+      );
+      if (!contentExists) {
+        return c.json(
+          {
+            error: {
+              message: '指定された本文ファイルがストレージ上に存在しません。',
+            },
+          },
+          400,
+        );
+      }
+
+      // 添付ファイル群の実体存在確認。
+      if (attachments.length > 0) {
+        const checkResults = await Promise.all(
+          attachments.map(async (attachment) => {
+            const exists = await checkR2ObjectExists(
+              c.env.BUCKET,
+              attachment.r2Key,
+              r2Creds,
+            );
+            return {
+              fileName: attachment.fileName,
+              exists,
+            };
+          }),
+        );
+
+        const missingAttachment = checkResults.find((result) => !result.exists);
+        if (missingAttachment) {
+          return c.json(
+            {
+              error: {
+                message: `添付ファイル「${missingAttachment.fileName}」がストレージ上に存在しません。`,
+              },
+            },
+            400,
+          );
+        }
+      }
+    } catch (error) {
+      console.error('R2オブジェクト存在確認エラー:', error);
+      return c.json(
+        {
+          error: {
+            message: 'ストレージの検証中にエラーが発生しました。',
+          },
         },
-      },
-      500,
-    );
-  }
+        500,
+      );
+    }
 
-  // 作成日時および有効期限日時の決定(ISO 8601形式で統一)。
-  const createdAt = new Date().toISOString();
-  const updatedAt = createdAt;
-  const expiresAt = calculateExpiresAt(expiration, new Date(createdAt));
+    // 作成日時および有効期限日時の決定(ISO 8601形式で統一)。
+    const createdAt = new Date().toISOString();
+    const updatedAt = createdAt;
+    const expiresAt = calculateExpiresAt(expiration, new Date(createdAt));
 
-  // D1へのアトミックコミット(主キー衝突時は最大3回リトライ)。
-  const maxRetries = 3;
-  let committedSlug: string | null = null;
-  let lastError: unknown = null;
+    // D1へのアトミックコミット(主キー衝突時は最大3回リトライ)。
+    const maxRetries = 3;
+    let committedSlug: string | null = null;
+    let lastError: unknown = null;
 
-  for (let attempt = 0; attempt < maxRetries; attempt++) {
-    const candidateSlug = generateSlug();
+    for (let attempt = 0; attempt < maxRetries; attempt++) {
+      const candidateSlug = generateSlug();
 
-    // ドキュメント本体の登録ステートメント。
-    const documentStatement = c.env.DB.prepare(
-      `INSERT INTO documents (
+      // ドキュメント本体の登録ステートメント。
+      const documentStatement = c.env.DB.prepare(
+        `INSERT INTO documents (
         id,
         title,
         description,
@@ -171,20 +182,20 @@ documentsRouter.post('/', async (c) => {
         created_at,
         updated_at
       ) VALUES (?, ?, ?, ?, 'published', ?, ?, ?)`,
-    ).bind(
-      candidateSlug,
-      title,
-      description ?? null,
-      contentR2Key,
-      expiresAt,
-      createdAt,
-      updatedAt,
-    );
+      ).bind(
+        candidateSlug,
+        title,
+        description ?? null,
+        contentR2Key,
+        expiresAt,
+        createdAt,
+        updatedAt,
+      );
 
-    // 添付ファイル群の登録ステートメント配列(外部キー順序を担保)。
-    const attachmentStatements = attachments.map((attachment) => {
-      return c.env.DB.prepare(
-        `INSERT INTO attachments (
+      // 添付ファイル群の登録ステートメント配列(外部キー順序を担保)。
+      const attachmentStatements = attachments.map((attachment) => {
+        return c.env.DB.prepare(
+          `INSERT INTO attachments (
           id,
           document_id,
           file_name,
@@ -193,74 +204,75 @@ documentsRouter.post('/', async (c) => {
           r2_key,
           created_at
         ) VALUES (?, ?, ?, ?, ?, ?, ?)`,
-      ).bind(
-        attachment.id,
-        candidateSlug,
-        attachment.fileName,
-        attachment.fileSize,
-        attachment.mimeType,
-        attachment.r2Key,
-        createdAt,
-      );
-    });
-
-    try {
-      // 単一トランザクション内で一括実行する。
-      await c.env.DB.batch([documentStatement, ...attachmentStatements]);
-      committedSlug = candidateSlug;
-      break;
-    } catch (error) {
-      lastError = error;
-      const errorMessage =
-        error instanceof Error ? error.message : String(error);
-
-      // 主キーの一意性制約違反時はリトライを実施する。
-      if (
-        errorMessage.includes('UNIQUE constraint failed') ||
-        errorMessage.includes('PRIMARY KEY')
-      ) {
-        console.warn(
-          `Slug衝突を検知しました(${candidateSlug})。再試行中(${attempt + 1}/${maxRetries})...`,
+        ).bind(
+          attachment.id,
+          candidateSlug,
+          attachment.fileName,
+          attachment.fileSize,
+          attachment.mimeType,
+          attachment.r2Key,
+          createdAt,
         );
-        continue;
-      }
+      });
 
-      // その他のDBエラー時はリトライせず中断する。
-      console.error('D1データベース書き込みエラー:', error);
+      try {
+        // 単一トランザクション内で一括実行する。
+        await c.env.DB.batch([documentStatement, ...attachmentStatements]);
+        committedSlug = candidateSlug;
+        break;
+      } catch (error) {
+        lastError = error;
+        const errorMessage =
+          error instanceof Error ? error.message : String(error);
+
+        // 主キーの一意性制約違反時はリトライを実施する。
+        if (
+          errorMessage.includes('UNIQUE constraint failed') ||
+          errorMessage.includes('PRIMARY KEY')
+        ) {
+          console.warn(
+            `Slug衝突を検知しました(${candidateSlug})。再試行中(${attempt + 1}/${maxRetries})...`,
+          );
+          continue;
+        }
+
+        // その他のDBエラー時はリトライせず中断する。
+        console.error('D1データベース書き込みエラー:', error);
+        return c.json(
+          {
+            error: {
+              message: 'データベースの書き込みに失敗しました。',
+            },
+          },
+          500,
+        );
+      }
+    }
+
+    if (!committedSlug) {
+      console.error('Slug生成とD1コミットのリトライ上限超過:', lastError);
       return c.json(
         {
           error: {
-            message: 'データベースの書き込みに失敗しました。',
+            message: 'ドキュメント識別子の採番に失敗しました。',
           },
         },
         500,
       );
     }
-  }
 
-  if (!committedSlug) {
-    console.error('Slug生成とD1コミットのリトライ上限超過:', lastError);
-    return c.json(
-      {
-        error: {
-          message: 'ドキュメント識別子の採番に失敗しました。',
-        },
-      },
-      500,
-    );
-  }
+    // 確定コミットレスポンスの形成。
+    const responsePayload: DocumentCommitResponse = {
+      id: committedSlug,
+      url: `/p/${committedSlug}`,
+      title,
+      expiresAt,
+      createdAt,
+    };
 
-  // 確定コミットレスポンスの形成。
-  const responsePayload: DocumentCommitResponse = {
-    id: committedSlug,
-    url: `/p/${committedSlug}`,
-    title,
-    expiresAt,
-    createdAt,
-  };
-
-  return c.json(responsePayload, 201);
-});
+    return c.json(responsePayload, 201);
+  },
+);
 
 /** D1のドキュメント一覧クエリが返却するレコード型。 */
 interface DocumentListRow {

@@ -63,3 +63,19 @@ export const EXPIRATION_SECONDS_MAP: Record<ExpirationPreset, number | null> = {
 
 /** R2 Presigned PUT URL の有効期限(秒単位、5分)。 */
 export const PRESIGNED_URL_EXPIRATION_SECONDS = 300;
+
+/** アップロード署名発行APIのレートリミット上限(1分あたりの最大リクエスト数)。 */
+export const RATE_LIMIT_UPLOAD_SIGN_LIMIT = 10;
+
+/** アップロード署名発行APIのレートリミットウィンドウ秒数(1分)。 */
+export const RATE_LIMIT_UPLOAD_SIGN_WINDOW_SECONDS = 60;
+
+/** ドキュメントコミットAPIのレートリミット上限(1分あたりの最大リクエスト数)。 */
+export const RATE_LIMIT_DOCUMENT_COMMIT_LIMIT = 3;
+
+/** ドキュメントコミットAPIのレートリミットウィンドウ秒数(1分)。 */
+export const RATE_LIMIT_DOCUMENT_COMMIT_WINDOW_SECONDS = 60;
+
+/** レートリミット超過時の既定エラーメッセージ。 */
+export const RATE_LIMIT_EXCEEDED_MESSAGE =
+  'リクエスト回数の上限を超えました。しばらく待ってから再試行してください。';
