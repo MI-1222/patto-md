@@ -122,3 +122,36 @@ export const PASSCODE_AUTH_COOKIE_PREFIX = 'patto_doc_auth_';
 /** レートリミット超過時の既定エラーメッセージ。 */
 export const RATE_LIMIT_EXCEEDED_MESSAGE =
   'リクエスト回数の上限を超えました。しばらく待ってから再試行してください。';
+
+/** OAuth対応プロバイダの選択肢リスト。 */
+export const OAUTH_PROVIDERS = ['discord', 'github'] as const;
+
+/** OAuth対応プロバイダ種別の型。 */
+export type OAuthProvider = (typeof OAUTH_PROVIDERS)[number];
+
+/** OAuthセッション認証 `Cookie` 名。 */
+export const AUTH_SESSION_COOKIE_NAME = 'patto_session';
+
+/** OAuth CSRF対策用 `state` `Cookie` 名。 */
+export const OAUTH_STATE_COOKIE_NAME = 'patto_oauth_state';
+
+/** OAuthリダイレクト先復帰用 `Cookie` 名。 */
+export const OAUTH_RETURN_TO_COOKIE_NAME = 'patto_oauth_return_to';
+
+/** OAuthセッションの有効期限(秒単位、7日間)。 */
+export const AUTH_SESSION_EXPIRATION_SECONDS = 7 * 24 * 60 * 60;
+
+/** OAuth `state` `Cookie` の有効期限(秒単位、5分間)。 */
+export const OAUTH_STATE_EXPIRATION_SECONDS = 300;
+
+/** OAuth認可開始APIのレートリミット上限(1分あたりの最大リクエスト数)。 */
+export const RATE_LIMIT_AUTH_START_LIMIT = 10;
+
+/** OAuth認可開始APIのレートリミットウィンドウ秒数(1分)。 */
+export const RATE_LIMIT_AUTH_START_WINDOW_SECONDS = 60;
+
+/** OAuthコールバック受信APIのレートリミット上限(1分あたりの最大リクエスト数)。 */
+export const RATE_LIMIT_AUTH_CALLBACK_LIMIT = 10;
+
+/** OAuthコールバック受信APIのレートリミットウィンドウ秒数(1分)。 */
+export const RATE_LIMIT_AUTH_CALLBACK_WINDOW_SECONDS = 60;

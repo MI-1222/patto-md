@@ -1,6 +1,7 @@
 /** Cloudflare Workers API の型定義。 */
 
 import type {
+  AuthUser,
   CapabilityTokenType,
   DocumentVisibility,
   OwnerProvider,
@@ -8,9 +9,22 @@ import type {
 
 /**
  * Cloudflare Workers の環境バインディングおよびカスタム環境変数の型定義。
- * (`wrangler types` で自動生成されるグローバルな `Env` 型のエイリアス)
+ * (`wrangler types` で自動生成されるグローバルな `Env` 型のエイリアスと補完定義)
  */
-export type AppBindings = Env;
+export type AppBindings = Env & {
+  /** Discord OAuth2 クライアントID。 */
+  DISCORD_CLIENT_ID?: string;
+  /** Discord OAuth2 クライアントシークレット。 */
+  DISCORD_CLIENT_SECRET?: string;
+  /** GitHub OAuth2 クライアントID。 */
+  GITHUB_CLIENT_ID?: string;
+  /** GitHub OAuth2 クライアントシークレット。 */
+  GITHUB_CLIENT_SECRET?: string;
+  /** OAuth コールバックURLの解決用ベースURL。 */
+  AUTH_REDIRECT_BASE_URL?: string;
+  /** JWT 署名用シークレットキー。 */
+  JWT_SECRET?: string;
+};
 
 /** 認証済みドキュメント情報レコード。 */
 export interface AuthenticatedDocument {
@@ -68,5 +82,7 @@ export type AppEnv = {
     authDoc?: AuthenticatedDocument;
     /** 検証されたトークンの認可ロール(`edit` または `modify`)。 */
     tokenRole?: CapabilityTokenRole;
+    /** 認証セッションミドルウェアによって検証・解決されたログインユーザー情報。 */
+    user?: AuthUser | null;
   };
 };
