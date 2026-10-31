@@ -16,7 +16,7 @@ import {
   type ResolvedAsset,
 } from '../markdown';
 import {
-  compressImage,
+  compressImagesConcurrently,
   type CompressedImageResult,
   MAX_RAW_TOTAL_FILE_SIZE,
 } from '../storage';
@@ -244,19 +244,28 @@ export async function executeUpdatePipeline(
       percent: 5,
     });
 
-    for (let i = 0; i < totalAssets; i++) {
-      const asset = uniqueResolvedAssets[i];
-      const result = await compressImage(asset.file);
-      compressedAssetMap.set(asset.relativePath, result);
+    const compressionResults = await compressImagesConcurrently(
+      uniqueResolvedAssets.map((asset) => asset.file),
+      {
+        concurrency: 2,
+        onProgress: (current, total) => {
+          const percent = 5 + Math.floor((current / total) * 15);
+          onProgress?.({
+            stage: 'optimizing',
+            current,
+            total,
+            message: `画像を最適化中 (${current}/${total})...`,
+            percent,
+          });
+        },
+      },
+    );
 
-      const percent = 5 + Math.floor(((i + 1) / totalAssets) * 15);
-      onProgress?.({
-        stage: 'optimizing',
-        current: i + 1,
-        total: totalAssets,
-        message: `画像を最適化中 (${i + 1}/${totalAssets})...`,
-        percent,
-      });
+    for (let i = 0; i < totalAssets; i++) {
+      compressedAssetMap.set(
+        uniqueResolvedAssets[i].relativePath,
+        compressionResults[i],
+      );
     }
   }
 
