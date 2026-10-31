@@ -1,4 +1,4 @@
-/** ケイパビリティトークンによるドキュメント認可処理およびミドルウェア。 */
+/** ケイパビリティトークンおよびOAuthセッションによるドキュメント認可処理およびミドルウェア。 */
 
 import type { MiddlewareHandler } from 'hono';
 import {
@@ -7,6 +7,7 @@ import {
   verifyTokenHash,
   type CapabilityTokenType,
 } from '@patto-md/shared';
+import { resolveSessionUser } from '../middlewares/session.ts';
 import type { AppEnv, AuthenticatedDocument } from '../types.ts';
 
 /**
@@ -28,15 +29,16 @@ export function extractBearerToken(authHeader?: string | null): string | null {
 }
 
 /**
- * ドキュメント操作に必要なケイパビリティ権限を検証する Hono ミドルウェアを生成する。
+ * ドキュメント操作に必要な権限を検証する Hono ミドルウェアを生成する。
  *
- * `Authorization: Bearer <token>` ヘッダーおよび URL パラメータ `:id` を検証し、D1 レコードと照合する。
+ * `Authorization: Bearer <token>` ヘッダー、またはログイン中 OAuth セッションによる所有者照合を行い、
+ * D1 データベース内のレコードと照合して認可を判定する。
  *
  * 対象レコードが存在しない場合や論理削除済み(`status = 'deleted'`)の場合は 404、
  * 規約違反通報により凍結済み(`status = 'suspended'`)の場合は 403 を返却して処理を遮断する。
  *
- * 対象レコードが存在しない場合や論理削除済み(`status = 'deleted'`)の場合は 404、規約違反通報により凍結済み(`status = 'suspended'`)の場合は 403 を返却して処理を遮断する。
- * 特権トークン(`edit`)はすべての操作を認可し、更新トークン(`modify`)は本文更新権限要求時のみ認可する。
+ * 特権トークン(`edit`)およびドキュメント所有者セッションはすべての操作を認可し、
+ * 更新トークン(`modify`)は本文更新権限要求時のみ認可する。
  * 認可成功時はコンテキスト変数へ `authDoc` と `tokenRole` を格納する。
  *
  * @param requiredRole - 必要な最小権限ロール(`edit`: 特権操作 / `modify`: 本文更新)。
@@ -52,18 +54,8 @@ export function createDocumentAuthMiddleware(
 
     const authHeader = c.req.header('Authorization');
     const token = extractBearerToken(authHeader);
-    if (!token) {
-      return c.json(
-        {
-          error: {
-            message: '認証トークンが指定されていません。',
-          },
-        },
-        401,
-      );
-    }
 
-    if (!CAPABILITY_TOKEN_PATTERN.test(token)) {
+    if (token && !CAPABILITY_TOKEN_PATTERN.test(token)) {
       return c.json(
         {
           error: {
@@ -83,6 +75,18 @@ export function createDocumentAuthMiddleware(
           },
         },
         400,
+      );
+    }
+
+    const currentUser = !token ? await resolveSessionUser(c) : null;
+    if (!token && !currentUser) {
+      return c.json(
+        {
+          error: {
+            message: '認証トークンが指定されていません。',
+          },
+        },
+        401,
       );
     }
 
@@ -146,20 +150,43 @@ export function createDocumentAuthMiddleware(
 
     let matchedRole: CapabilityTokenType | null = null;
 
-    const isEditMatched = await verifyTokenHash(token, doc.edit_token_hash);
-    if (isEditMatched) {
-      matchedRole = 'edit';
-    } else if (requiredRole === 'modify') {
-      const isModifyMatched = await verifyTokenHash(
-        token,
-        doc.modify_token_hash,
-      );
-      if (isModifyMatched) {
-        matchedRole = 'modify';
+    if (token) {
+      const isEditMatched = await verifyTokenHash(token, doc.edit_token_hash);
+      if (isEditMatched) {
+        matchedRole = 'edit';
+      } else if (requiredRole === 'modify') {
+        const isModifyMatched = await verifyTokenHash(
+          token,
+          doc.modify_token_hash,
+        );
+        if (isModifyMatched) {
+          matchedRole = 'modify';
+        }
+      }
+    }
+
+    if (!matchedRole && doc.owner_user_id && doc.owner_provider) {
+      const sessionUser = currentUser ?? (await resolveSessionUser(c));
+      if (
+        sessionUser &&
+        sessionUser.providerUserId === doc.owner_user_id &&
+        sessionUser.provider === doc.owner_provider
+      ) {
+        matchedRole = 'edit';
       }
     }
 
     if (!matchedRole) {
+      if (!token) {
+        return c.json(
+          {
+            error: {
+              message: '認証トークンが指定されていません。',
+            },
+          },
+          401,
+        );
+      }
       return c.json(
         {
           error: {

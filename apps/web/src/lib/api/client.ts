@@ -1,5 +1,7 @@
 import {
   TURNSTILE_TOKEN_HEADER,
+  type AuthUser,
+  type DocumentClaimResponse,
   type DocumentCommitRequest,
   type DocumentCommitResponse,
   type DocumentListResponse,
@@ -450,6 +452,8 @@ export interface FetchDocumentsParams {
   limit?: number;
   /** 絞り込み対象のドキュメントID配列。 */
   ids?: string[];
+  /** ログイン中ユーザー自身の所有ドキュメントのみを取得するかどうか。 */
+  mine?: boolean;
   /** 接続先APIのベースURL。 */
   baseUrl?: string;
   /** リクエスト送信に使用するカスタム fetch 関数(Service Binding 等)。 */
@@ -477,6 +481,7 @@ export async function fetchDocuments(
     page,
     limit,
     ids,
+    mine,
     baseUrl = getApiBaseUrl(),
     customFetch = fetch,
   } = params;
@@ -488,7 +493,9 @@ export async function fetchDocuments(
   if (limit !== undefined && limit > 0) {
     query.set('limit', String(limit));
   }
-  if (ids && ids.length > 0) {
+  if (mine) {
+    query.set('mine', 'true');
+  } else if (ids && ids.length > 0) {
     query.set('ids', ids.join(','));
   }
 
@@ -498,9 +505,13 @@ export async function fetchDocuments(
 
   let response: Response;
   try {
-    response = await customFetch(url, {
+    const fetchOptions: RequestInit = {
       method: 'GET',
-    });
+    };
+    if (mine) {
+      fetchOptions.credentials = 'include';
+    }
+    response = await customFetch(url, fetchOptions);
   } catch (error) {
     const detail = error instanceof Error ? error.message : String(error);
     throw new ApiError(
@@ -531,4 +542,114 @@ export async function fetchDocuments(
     data,
     cacheControl,
   };
+}
+
+/**
+ * 匿名ドキュメントの所有権移譲API (`POST /api/documents/:id/claim`) を呼び出す。
+ *
+ * @param id - 対象ドキュメントID(`slug`)。
+ * @param editToken - 特権管理トークン(`edit_token`)。
+ * @param baseUrl - 接続先APIのベースURL。
+ * @returns 所有権移譲完了レスポンス。
+ */
+export async function claimDocument(
+  id: string,
+  editToken: string,
+  baseUrl: string = getApiBaseUrl(),
+): Promise<DocumentClaimResponse> {
+  const url = `${baseUrl}/api/documents/${id}/claim`;
+
+  let response: Response;
+  try {
+    response = await fetch(url, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+      },
+      credentials: 'include',
+      body: JSON.stringify({ editToken }),
+    });
+  } catch (error) {
+    const detail = error instanceof Error ? error.message : String(error);
+    throw new ApiError(`所有権移譲APIへの接続に失敗しました: ${detail}`, 0);
+  }
+
+  if (!response.ok) {
+    let errorMessage = '所有権の移譲に失敗しました。';
+    let details: unknown;
+    try {
+      const errorJson = (await response.json()) as {
+        error?: { message?: string; details?: unknown };
+      };
+      if (errorJson.error?.message) {
+        errorMessage = errorJson.error.message;
+      }
+      details = errorJson.error?.details;
+    } catch {}
+    throw new ApiError(errorMessage, response.status, details);
+  }
+
+  return (await response.json()) as DocumentClaimResponse;
+}
+
+/**
+ * 現在ログイン中ユーザーの情報取得API (`GET /api/auth/me`) を呼び出す。
+ *
+ * @param baseUrl - 接続先APIのベースURL。
+ * @returns ログイン中ユーザー情報。未認証時は `null`。
+ */
+export async function fetchCurrentUser(
+  baseUrl: string = getApiBaseUrl(),
+): Promise<AuthUser | null> {
+  const url = `${baseUrl}/api/auth/me`;
+
+  let response: Response;
+  try {
+    response = await fetch(url, {
+      method: 'GET',
+      credentials: 'include',
+    });
+  } catch {
+    return null;
+  }
+
+  if (!response.ok) {
+    return null;
+  }
+
+  try {
+    const json = (await response.json()) as { user?: AuthUser | null };
+    return json.user ?? null;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * ログアウトAPI (`POST /api/auth/logout`) を呼び出す。
+ *
+ * @param baseUrl - 接続先APIのベースURL。
+ * @returns ログアウト結果。
+ */
+export async function logout(
+  baseUrl: string = getApiBaseUrl(),
+): Promise<{ success: boolean }> {
+  const url = `${baseUrl}/api/auth/logout`;
+
+  let response: Response;
+  try {
+    response = await fetch(url, {
+      method: 'POST',
+      credentials: 'include',
+    });
+  } catch (error) {
+    const detail = error instanceof Error ? error.message : String(error);
+    throw new ApiError(`ログアウトAPIへの接続に失敗しました: ${detail}`, 0);
+  }
+
+  if (!response.ok) {
+    throw new ApiError('ログアウトに失敗しました。', response.status);
+  }
+
+  return (await response.json()) as { success: boolean };
 }

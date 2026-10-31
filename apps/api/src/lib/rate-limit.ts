@@ -1,5 +1,5 @@
 import { RATE_LIMIT_EXCEEDED_MESSAGE } from '@patto-md/shared/constants/limits';
-import type { Context, MiddlewareHandler } from 'hono';
+import type { Context, Env, MiddlewareHandler } from 'hono';
 
 /** レートリミット判定結果の型定義。 */
 export interface RateLimitResult {
@@ -347,11 +347,9 @@ export interface RateLimitMiddlewareOptions {
  * @param options - レートリミット設定オプション。
  * @returns Hono ミドルウェアハンドラー。
  */
-export function createRateLimitMiddleware<
-  E extends { Bindings: Record<string, unknown> } = {
-    Bindings: Record<string, unknown>;
-  },
->(options: RateLimitMiddlewareOptions): MiddlewareHandler<E> {
+export function createRateLimitMiddleware<E extends Env = Env>(
+  options: RateLimitMiddlewareOptions,
+): MiddlewareHandler<E> {
   const {
     limit,
     windowSeconds = 60,

@@ -94,6 +94,12 @@ export const RATE_LIMIT_DOCUMENT_RENEW_LIMIT = 5;
 /** ドキュメント再公開・有効期限延長APIのレートリミットウィンドウ秒数(1分)。 */
 export const RATE_LIMIT_DOCUMENT_RENEW_WINDOW_SECONDS = 60;
 
+/** ドキュメント所有権移譲(Claim)APIのレートリミット上限(1分あたりの最大リクエスト数)。 */
+export const RATE_LIMIT_DOCUMENT_CLAIM_LIMIT = 5;
+
+/** ドキュメント所有権移譲(Claim)APIのレートリミットウィンドウ秒数(1分)。 */
+export const RATE_LIMIT_DOCUMENT_CLAIM_WINDOW_SECONDS = 60;
+
 /** パスコード照合APIのレートリミット上限(1分あたりの最大リクエスト数)。 */
 export const RATE_LIMIT_VERIFY_PASSCODE_LIMIT = 5;
 

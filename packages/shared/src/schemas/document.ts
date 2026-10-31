@@ -8,6 +8,7 @@ import {
   MAX_TOTAL_FILE_SIZE,
   MIN_PASSCODE_LENGTH,
   MIN_TITLE_LENGTH,
+  OAUTH_PROVIDERS,
   SLUG_PATTERN,
 } from '../constants/limits.ts';
 import {
@@ -160,6 +161,12 @@ export const documentResponseSchema = z.object({
   /** 公開ステータス。 */
   status: z.enum(['published', 'expired', 'deleted', 'suspended']),
 
+  /** 所有者ユーザー識別子(`null` の場合は匿名ドキュメント)。 */
+  ownerUserId: z.string().nullable().optional(),
+
+  /** 所有者プロバイダ種別(`null` の場合は匿名ドキュメント)。 */
+  ownerProvider: z.enum(OAUTH_PROVIDERS).nullable().optional(),
+
   /** 有効期限日時(ISO 8601文字列、無期限時は `null`)。 */
   expiresAt: z.iso.datetime().nullable(),
 
@@ -192,6 +199,9 @@ export const documentListItemSchema = z.object({
 
   /** 作成日時(ISO 8601文字列)。 */
   createdAt: z.iso.datetime(),
+
+  /** ドキュメント公開範囲(未指定時は `public`)。 */
+  visibility: z.enum(DOCUMENT_VISIBILITIES).default('public').optional(),
 
   /** 添付ファイル数。 */
   attachmentCount: z.number().int().nonnegative(),
@@ -413,6 +423,12 @@ export const documentProtectedInfoSchema = z.object({
   /** 公開ステータス。 */
   status: z.enum(['published', 'expired', 'deleted', 'suspended']),
 
+  /** 所有者ユーザー識別子(`null` の場合は匿名ドキュメント)。 */
+  ownerUserId: z.string().nullable().optional(),
+
+  /** 所有者プロバイダ種別(`null` の場合は匿名ドキュメント)。 */
+  ownerProvider: z.enum(OAUTH_PROVIDERS).nullable().optional(),
+
   /** 有効期限日時(ISO 8601文字列、無期限時は `null`)。 */
   expiresAt: z.iso.datetime().nullable(),
 
@@ -428,3 +444,35 @@ export const documentProtectedInfoSchema = z.object({
 
 /** 保護ドキュメントの未認証時情報の型。 */
 export type DocumentProtectedInfo = z.infer<typeof documentProtectedInfoSchema>;
+
+/** ドキュメント所有権移譲要求(`POST /api/documents/:id/claim`)のスキーマ。 */
+export const documentClaimRequestSchema = z.object({
+  /** ドキュメントの特権管理トークン(`edit_token`)。 */
+  editToken: z
+    .string()
+    .regex(EDIT_TOKEN_PATTERN, '無効な管理トークン形式です。'),
+});
+
+/** ドキュメント所有権移譲要求の型。 */
+export type DocumentClaimRequest = z.infer<typeof documentClaimRequestSchema>;
+
+/** ドキュメント所有権移譲レスポンス(`POST /api/documents/:id/claim`)のスキーマ。 */
+export const documentClaimResponseSchema = z.object({
+  /** 移譲処理成功フラグ。 */
+  success: z.boolean(),
+
+  /** 対象ドキュメントID(`Slug`)。 */
+  id: z.string(),
+
+  /** 紐付けられた所有者ユーザー識別子。 */
+  ownerUserId: z.string(),
+
+  /** 紐付けられた所有者プロバイダ種別。 */
+  ownerProvider: z.enum(OAUTH_PROVIDERS),
+
+  /** 最終更新日時(ISO 8601文字列)。 */
+  updatedAt: z.iso.datetime(),
+});
+
+/** ドキュメント所有権移譲レスポンスの型。 */
+export type DocumentClaimResponse = z.infer<typeof documentClaimResponseSchema>;

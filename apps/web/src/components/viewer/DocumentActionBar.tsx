@@ -1,5 +1,9 @@
 import React, { useState, useCallback, useMemo, useEffect } from 'react';
-import type { DocumentVisibility } from '@patto-md/shared';
+import type {
+  AuthUser,
+  DocumentVisibility,
+  OwnerProvider,
+} from '@patto-md/shared';
 import {
   CopyIcon,
   CheckIcon,
@@ -12,13 +16,20 @@ import {
   ShieldCheckIcon,
   KeyIcon,
   LockIcon,
+  UserCheckIcon,
 } from '../svg/ActionIcons';
+import {
+  claimDocument,
+  fetchCurrentUser,
+  getApiBaseUrl,
+} from '../../lib/api/client';
 import {
   consumeTokenFromUrlHash,
   getDocumentTokenRole,
   getDocumentTokens,
   type DocumentTokenRole,
 } from '../../lib/storage';
+import { addMyDocumentId } from '../../lib/storage/myDocuments';
 
 /** ドキュメント閲覧アクションバーの `Props` 定義。 */
 export interface DocumentActionBarProps {
@@ -32,6 +43,10 @@ export interface DocumentActionBarProps {
   createdAt: string;
   /** ドキュメント公開範囲(任意)。 */
   visibility?: DocumentVisibility;
+  /** 所有者ユーザー識別子(任意)。 */
+  ownerUserId?: string | null;
+  /** 所有者プロバイダ種別(任意)。 */
+  ownerProvider?: OwnerProvider | null;
   /** 編集ボタン押下時のコールバック(任意)。 */
   onEdit?: () => void;
   /** 有効期限延長ボタン押下時のコールバック(任意)。 */
@@ -41,7 +56,8 @@ export interface DocumentActionBarProps {
 }
 
 /** コピーおよび操作状態のフィードバック種別定義。 */
-type FeedbackTarget = 'markdown' | 'url' | 'admin-url' | 'action' | null;
+type FeedbackTarget =
+  'markdown' | 'url' | 'admin-url' | 'action' | 'claim' | null;
 
 /**
  * 有効期限までの残り時間を表示用テキストに変換する。
@@ -106,6 +122,8 @@ export const DocumentActionBar: React.FC<DocumentActionBarProps> = ({
   expiresAt,
   createdAt,
   visibility,
+  ownerUserId,
+  ownerProvider,
   onEdit,
   onRenew,
   onDelete,
@@ -114,12 +132,25 @@ export const DocumentActionBar: React.FC<DocumentActionBarProps> = ({
   const [feedbackMessage, setFeedbackMessage] = useState<string | null>(null);
   const [tokenRole, setTokenRole] = useState<DocumentTokenRole>(null);
   const [isMounted, setIsMounted] = useState(false);
+  const [currentUser, setCurrentUser] = useState<AuthUser | null>(null);
+  const [claimedOwner, setClaimedOwner] = useState<{
+    ownerUserId: string;
+    ownerProvider: OwnerProvider;
+  } | null>(
+    ownerUserId && ownerProvider ? { ownerUserId, ownerProvider } : null,
+  );
+  const [isClaiming, setIsClaiming] = useState(false);
+  const [showLoginModal, setShowLoginModal] = useState(false);
 
   useEffect(() => {
     consumeTokenFromUrlHash(documentId);
     const role = getDocumentTokenRole(documentId);
     setTokenRole(role);
     setIsMounted(true);
+
+    fetchCurrentUser().then((user) => {
+      setCurrentUser(user);
+    });
   }, [documentId]);
 
   /** コピー完了通知メッセージを設定し、2秒後に自動消去する。 */
@@ -215,6 +246,37 @@ export const DocumentActionBar: React.FC<DocumentActionBarProps> = ({
     }
   }, [onDelete, triggerFeedback]);
 
+  /** 匿名ドキュメントの所有権をアカウントへ移譲するハンドラー。 */
+  const handleClaim = useCallback(async () => {
+    if (!currentUser) {
+      setShowLoginModal(true);
+      return;
+    }
+
+    const tokens = getDocumentTokens(documentId);
+    if (!tokens?.editToken) {
+      triggerFeedback('claim', '特権管理トークンが見つかりません。');
+      return;
+    }
+
+    setIsClaiming(true);
+    try {
+      const res = await claimDocument(documentId, tokens.editToken);
+      setClaimedOwner({
+        ownerUserId: res.ownerUserId,
+        ownerProvider: res.ownerProvider,
+      });
+      addMyDocumentId(documentId);
+      triggerFeedback('claim', 'アカウントに保存しました。');
+    } catch (error) {
+      const message =
+        error instanceof Error ? error.message : '所有権の移譲に失敗しました。';
+      triggerFeedback('claim', message);
+    } finally {
+      setIsClaiming(false);
+    }
+  }, [currentUser, documentId, triggerFeedback]);
+
   /** 有効期限の残り時間表示テキスト。 */
   const remainingText = useMemo(
     () => formatRemainingTime(expiresAt),
@@ -281,6 +343,16 @@ export const DocumentActionBar: React.FC<DocumentActionBarProps> = ({
               )}
             </div>
           )}
+
+          {isMounted && isOwner && claimedOwner && (
+            <div
+              className="inline-flex items-center gap-1 rounded-full border border-purple-500/30 bg-purple-500/10 px-2 py-0.5 text-xs font-medium text-purple-300"
+              title="アカウント連携済みドキュメント"
+            >
+              <UserCheckIcon className="size-3 text-purple-400" />
+              <span>アカウント所有</span>
+            </div>
+          )}
         </div>
 
         <div className="flex flex-wrap items-center gap-2">
@@ -304,6 +376,19 @@ export const DocumentActionBar: React.FC<DocumentActionBarProps> = ({
 
               {isOwner && (
                 <>
+                  {!claimedOwner && (
+                    <button
+                      type="button"
+                      onClick={handleClaim}
+                      disabled={isClaiming}
+                      className="inline-flex items-center gap-1 rounded-md border border-purple-500/30 bg-purple-500/10 px-2.5 py-1.5 text-xs font-medium text-purple-300 transition-colors hover:border-purple-500/50 hover:bg-purple-500/20 focus:ring-1 focus:ring-purple-500 focus:outline-none disabled:opacity-50"
+                      title="このドキュメントをアカウントの管理下に保存"
+                    >
+                      <UserCheckIcon className="size-3.5 text-purple-400" />
+                      <span>{isClaiming ? '保存中...' : 'アカウント保存'}</span>
+                    </button>
+                  )}
+
                   <button
                     type="button"
                     onClick={handleRenew}
@@ -383,6 +468,50 @@ export const DocumentActionBar: React.FC<DocumentActionBarProps> = ({
           </button>
         </div>
       </div>
+
+      {showLoginModal && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4 backdrop-blur-sm">
+          <div className="w-full max-w-sm rounded-xl border border-neutral-800 bg-neutral-900 p-6 shadow-2xl">
+            <h3 className="text-base font-semibold text-neutral-100">
+              アカウントに保存
+            </h3>
+            <p className="mt-2 text-xs text-neutral-400">
+              ドキュメントをアカウントに保存すると、別の端末からでも管理・編集できるようになります。
+            </p>
+            <div className="mt-5 space-y-2.5">
+              <a
+                href={`${getApiBaseUrl()}/api/auth/github?return_to=${encodeURIComponent(
+                  typeof window !== 'undefined'
+                    ? window.location.pathname + window.location.hash
+                    : '',
+                )}`}
+                className="flex w-full items-center justify-center gap-2 rounded-lg bg-neutral-800 px-4 py-2.5 text-xs font-medium text-neutral-200 transition-colors hover:bg-neutral-700"
+              >
+                <span>GitHubでログインして保存</span>
+              </a>
+              <a
+                href={`${getApiBaseUrl()}/api/auth/discord?return_to=${encodeURIComponent(
+                  typeof window !== 'undefined'
+                    ? window.location.pathname + window.location.hash
+                    : '',
+                )}`}
+                className="flex w-full items-center justify-center gap-2 rounded-lg bg-[#5865F2]/20 px-4 py-2.5 text-xs font-medium text-[#5865F2] transition-colors hover:bg-[#5865F2]/30"
+              >
+                <span>Discordでログインして保存</span>
+              </a>
+            </div>
+            <div className="mt-4 text-center">
+              <button
+                type="button"
+                onClick={() => setShowLoginModal(false)}
+                className="text-xs text-neutral-500 hover:text-neutral-300"
+              >
+                キャンセル
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 };

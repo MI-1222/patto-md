@@ -7,6 +7,9 @@ import {
   fetchDocument,
   fetchDocuments,
   verifyPasscode,
+  claimDocument,
+  fetchCurrentUser,
+  logout,
   ApiError,
 } from '../client';
 import type {
@@ -461,6 +464,33 @@ describe('APIクライアント(src/lib/api/client.ts)', () => {
       expect(result.cacheControl).toBe('public, max-age=10');
     });
 
+    it('mine: true 指定時にクエリパラメータと credentials: include を付与してリクエストする。', async () => {
+      const mockListResponse = {
+        items: [],
+        total: 0,
+        page: 1,
+        limit: 12,
+        totalPages: 0,
+      };
+
+      globalThis.fetch = vi.fn().mockResolvedValue({
+        ok: true,
+        status: 200,
+        headers: new Headers(),
+        json: async () => mockListResponse,
+      } as unknown as Response);
+
+      await fetchDocuments({
+        mine: true,
+        baseUrl: 'http://localhost:8787',
+      });
+
+      expect(globalThis.fetch).toHaveBeenCalledWith(
+        'http://localhost:8787/api/documents?mine=true',
+        { method: 'GET', credentials: 'include' },
+      );
+    });
+
     it('APIエラー時に適切な `ApiError` を送出する。', async () => {
       globalThis.fetch = vi.fn().mockResolvedValue({
         ok: false,
@@ -472,6 +502,98 @@ describe('APIクライアント(src/lib/api/client.ts)', () => {
       } as unknown as Response);
 
       await expect(fetchDocuments()).rejects.toThrow('一覧取得エラー。');
+    });
+  });
+
+  describe('claimDocument', () => {
+    it('正常時に所有権移譲APIへPOSTリクエストを送信し、レスポンスを取得する。', async () => {
+      const mockResponse = {
+        success: true,
+        id: 'valid-slug-12',
+        ownerUserId: 'gh-12345',
+        ownerProvider: 'github',
+        updatedAt: '2026-10-31T00:00:00.000Z',
+      };
+
+      globalThis.fetch = vi.fn().mockResolvedValue({
+        ok: true,
+        status: 200,
+        json: async () => mockResponse,
+      } as unknown as Response);
+
+      const result = await claimDocument(
+        'valid-slug-12',
+        'pt_edt_testtoken12345',
+        'http://localhost:8787',
+      );
+
+      expect(globalThis.fetch).toHaveBeenCalledWith(
+        'http://localhost:8787/api/documents/valid-slug-12/claim',
+        expect.objectContaining({
+          method: 'POST',
+          credentials: 'include',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ editToken: 'pt_edt_testtoken12345' }),
+        }),
+      );
+      expect(result).toEqual(mockResponse);
+    });
+
+    it('所有権移譲APIエラー時に `ApiError` を送出する。', async () => {
+      globalThis.fetch = vi.fn().mockResolvedValue({
+        ok: false,
+        status: 409,
+        json: async () => ({
+          error: {
+            message: 'このドキュメントは既に別のアカウントに所有されています。',
+          },
+        }),
+      } as unknown as Response);
+
+      await expect(
+        claimDocument(
+          'valid-slug-12',
+          'pt_edt_testtoken12345',
+          'http://localhost:8787',
+        ),
+      ).rejects.toThrow(
+        'このドキュメントは既に別のアカウントに所有されています。',
+      );
+    });
+  });
+
+  describe('fetchCurrentUser', () => {
+    it('認証済みユーザー情報が存在する場合、ユーザーオブジェクトを返却する。', async () => {
+      const mockUser = {
+        provider: 'github',
+        providerUserId: '12345',
+        username: 'octocat',
+        avatarUrl: null,
+      };
+
+      globalThis.fetch = vi.fn().mockResolvedValue({
+        ok: true,
+        status: 200,
+        json: async () => ({ user: mockUser }),
+      } as unknown as Response);
+
+      const user = await fetchCurrentUser('http://localhost:8787');
+      expect(user).toEqual(mockUser);
+      expect(globalThis.fetch).toHaveBeenCalledWith(
+        'http://localhost:8787/api/auth/me',
+        { method: 'GET', credentials: 'include' },
+      );
+    });
+
+    it('未認証時は null を返却する。', async () => {
+      globalThis.fetch = vi.fn().mockResolvedValue({
+        ok: true,
+        status: 200,
+        json: async () => ({ user: null }),
+      } as unknown as Response);
+
+      const user = await fetchCurrentUser('http://localhost:8787');
+      expect(user).toBeNull();
     });
   });
 });

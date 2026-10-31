@@ -1,10 +1,14 @@
 import {
+  AUTH_SESSION_COOKIE_NAME,
+  documentClaimRequestSchema,
   documentCommitRequestSchema,
   documentRenewRequestSchema,
   documentUpdateRequestSchema,
   documentVerifyPasscodeRequestSchema,
   generateCapabilityToken,
   hashToken,
+  RATE_LIMIT_DOCUMENT_CLAIM_LIMIT,
+  RATE_LIMIT_DOCUMENT_CLAIM_WINDOW_SECONDS,
   RATE_LIMIT_DOCUMENT_COMMIT_LIMIT,
   RATE_LIMIT_DOCUMENT_COMMIT_WINDOW_SECONDS,
   RATE_LIMIT_DOCUMENT_DELETE_LIMIT,
@@ -17,6 +21,7 @@ import {
   RATE_LIMIT_VERIFY_PASSCODE_WINDOW_SECONDS,
   verifyTokenHash,
   type AttachmentRecord,
+  type DocumentClaimResponse,
   type DocumentCommitResponse,
   type DocumentDeleteResponse,
   type DocumentListItem,
@@ -26,6 +31,7 @@ import {
   type DocumentResponse,
   type DocumentUpdateResponse,
   type DocumentVerifyPasscodeResponse,
+  type DocumentVisibility,
   SLUG_PATTERN,
   z,
 } from '@patto-md/shared';
@@ -45,6 +51,7 @@ import {
 } from '../lib/view-token.ts';
 import { createDocumentAuthMiddleware } from '../middlewares/auth.ts';
 import { createRateLimitMiddleware } from '../middlewares/rate-limit.ts';
+import { resolveSessionUser } from '../middlewares/session.ts';
 import type { AppEnv } from '../types';
 
 /** ドキュメント管理関連のサブルーター。 */
@@ -341,6 +348,8 @@ interface DocumentListRow {
   description: string | null;
   /** 有効期限日時(ISO 8601文字列、無期限時は `null`)。 */
   expires_at: string | null;
+  /** ドキュメント公開範囲。 */
+  visibility?: DocumentVisibility;
   /** 作成日時(ISO 8601文字列)。 */
   created_at: string;
   /** 添付ファイル数。 */
@@ -352,6 +361,7 @@ interface DocumentListRow {
  *
  * 公開中で有効期限内のドキュメント一覧を新着順でページネーション返却する。
  * クエリパラメーター `ids` にカンマ区切りでドキュメントID群が指定された場合は、該当ドキュメントのみを抽出する。
+ * クエリパラメーター `mine=true` または `owner=me` が指定された場合は、ログイン中ユーザーが所有する全ドキュメントを抽出する。
  */
 documentsRouter.get('/', async (c) => {
   const pageParam = parseInt(c.req.query('page') || '1', 10);
@@ -365,9 +375,28 @@ documentsRouter.get('/', async (c) => {
 
   const offset = (page - 1) * limit;
 
+  const isMine =
+    c.req.query('mine') === 'true' || c.req.query('owner') === 'me';
+
+  let currentUser = null;
+  if (isMine) {
+    currentUser = await resolveSessionUser(c);
+    if (!currentUser) {
+      c.header('Cache-Control', 'no-store');
+      return c.json(
+        {
+          error: {
+            message: 'ログインが必要です。',
+          },
+        },
+        401,
+      );
+    }
+  }
+
   const rawIds = c.req.query('ids');
   let targetIds: string[] = [];
-  if (rawIds) {
+  if (!isMine && rawIds) {
     targetIds = rawIds
       .split(',')
       .map((id) => id.trim())
@@ -388,16 +417,25 @@ documentsRouter.get('/', async (c) => {
   const nowIso = new Date().toISOString();
 
   try {
-    let whereClause =
-      "d.status = 'published' AND (d.expires_at IS NULL OR d.expires_at > ?)";
-    const queryParams: unknown[] = [nowIso];
+    let whereClause: string;
+    const queryParams: unknown[] = [];
 
-    if (targetIds.length > 0) {
-      const placeholders = targetIds.map(() => '?').join(', ');
-      whereClause += ` AND d.id IN (${placeholders})`;
-      queryParams.push(...targetIds);
+    if (isMine && currentUser) {
+      whereClause =
+        "d.owner_user_id = ? AND d.owner_provider = ? AND d.status != 'deleted'";
+      queryParams.push(currentUser.providerUserId, currentUser.provider);
     } else {
-      whereClause += " AND d.visibility = 'public'";
+      whereClause =
+        "d.status = 'published' AND (d.expires_at IS NULL OR d.expires_at > ?)";
+      queryParams.push(nowIso);
+
+      if (targetIds.length > 0) {
+        const placeholders = targetIds.map(() => '?').join(', ');
+        whereClause += ` AND d.id IN (${placeholders})`;
+        queryParams.push(...targetIds);
+      } else {
+        whereClause += " AND d.visibility = 'public'";
+      }
     }
 
     const countQuery = `SELECT COUNT(*) AS total FROM documents d WHERE ${whereClause}`;
@@ -411,6 +449,7 @@ documentsRouter.get('/', async (c) => {
         d.title,
         d.description,
         d.expires_at,
+        d.visibility,
         d.created_at,
         COUNT(a.id) AS attachment_count
       FROM documents d
@@ -434,13 +473,18 @@ documentsRouter.get('/', async (c) => {
       title: row.title,
       description: row.description ?? null,
       expiresAt: row.expires_at,
+      visibility: row.visibility ?? 'public',
       createdAt: row.created_at,
       attachmentCount: Number(row.attachment_count || 0),
     }));
 
     const totalPages = Math.ceil(total / limit);
 
-    c.header('Cache-Control', 'public, max-age=10, s-maxage=30');
+    if (isMine) {
+      c.header('Cache-Control', 'private, no-cache, no-store');
+    } else {
+      c.header('Cache-Control', 'public, max-age=10, s-maxage=30');
+    }
 
     const responsePayload: DocumentListResponse = {
       items,
@@ -503,6 +547,8 @@ documentsRouter.get('/:id', async (c) => {
         expires_at,
         edit_token_hash,
         modify_token_hash,
+        owner_user_id,
+        owner_provider,
         visibility,
         passcode_hash,
         created_at,
@@ -568,6 +614,17 @@ documentsRouter.get('/:id', async (c) => {
       }
     }
 
+    if (!isAuthorized && doc.owner_user_id && doc.owner_provider) {
+      const currentUser = await resolveSessionUser(c);
+      if (
+        currentUser &&
+        currentUser.providerUserId === doc.owner_user_id &&
+        currentUser.provider === doc.owner_provider
+      ) {
+        isAuthorized = true;
+      }
+    }
+
     if (!isAuthorized) {
       c.header('Cache-Control', 'private, no-cache, no-store');
       return c.json(
@@ -582,6 +639,8 @@ documentsRouter.get('/:id', async (c) => {
             visibility: doc.visibility,
             isProtected: true,
             status: doc.status,
+            ownerUserId: doc.owner_user_id,
+            ownerProvider: doc.owner_provider,
             expiresAt: doc.expires_at,
             createdAt: doc.created_at,
             updatedAt: doc.updated_at,
@@ -677,6 +736,8 @@ documentsRouter.get('/:id', async (c) => {
     visibility: doc.visibility,
     isProtected: false,
     status: doc.status,
+    ownerUserId: doc.owner_user_id,
+    ownerProvider: doc.owner_provider,
     expiresAt: doc.expires_at,
     createdAt: doc.created_at,
     updatedAt: doc.updated_at,
@@ -1231,6 +1292,260 @@ documentsRouter.post(
       expiresAt,
     };
 
+    return c.json(responsePayload, 200);
+  },
+);
+
+/**
+ * 匿名ドキュメント所有権移譲(`POST /api/documents/:id/claim`)エンドポイント。
+ *
+ * ログイン中ユーザーが特権管理トークン(`editToken`)を提示し、ドキュメントの所有権を自アカウントへ紐付ける。
+ *
+ * 処理手順:
+ * 1. セッション検証: 未ログイン時は 401 を返却する。
+ * 2. 識別子検証: `id` の形式が不正な場合は 400 を返却する。
+ * 3. 管理トークン抽出: リクエスト本文または `Authorization` ヘッダーから `editToken` を抽出する。
+ * 4. ドキュメント参照: 対象が存在しない・論理削除済みの場合は 404、凍結中は 403 を返却する。
+ * 5. トークン照合: `edit_token_hash` に対する定数時間照合を行い、権限のないトークン(`modifyToken` 等)を遮断する。
+ * 6. 所有者競合検証: 既に他者が所有している場合は 409 Conflict、同一ユーザーが再実行した場合は冪等に 200 OK を返却する。
+ * 7. 条件付きアトミック更新: D1 データベース内のレコードを更新し、所有権を確定する。
+ *
+ * 1分あたり最大5リクエストのレートリミットを適用する。
+ */
+documentsRouter.post(
+  '/:id/claim',
+  createRateLimitMiddleware({
+    action: 'document-claim',
+    limit: RATE_LIMIT_DOCUMENT_CLAIM_LIMIT,
+    windowSeconds: RATE_LIMIT_DOCUMENT_CLAIM_WINDOW_SECONDS,
+  }),
+  async (c) => {
+    const currentUser = await resolveSessionUser(c);
+
+    if (!currentUser) {
+      c.header('Cache-Control', 'no-store');
+      return c.json(
+        {
+          error: {
+            message: 'ドキュメントの所有権を移譲するにはログインが必要です。',
+          },
+        },
+        401,
+      );
+    }
+
+    const id = c.req.param('id');
+    if (!id || !SLUG_PATTERN.test(id)) {
+      c.header('Cache-Control', 'no-store');
+      return c.json(
+        {
+          error: {
+            message: '無効なドキュメント識別子です。',
+          },
+        },
+        400,
+      );
+    }
+
+    let editToken: string | null = null;
+    try {
+      const rawBody = await c.req.json();
+      const parseResult = documentClaimRequestSchema.safeParse(rawBody);
+      if (parseResult.success) {
+        editToken = parseResult.data.editToken;
+      }
+    } catch {
+      // JSON形式不正時はフォールバックとして Authorization ヘッダーを照合。
+    }
+
+    if (!editToken) {
+      const authHeader = c.req.header('Authorization');
+      const bearer = extractBearerToken(authHeader);
+      if (bearer) {
+        const parseResult = documentClaimRequestSchema.safeParse({
+          editToken: bearer,
+        });
+        if (parseResult.success) {
+          editToken = parseResult.data.editToken;
+        }
+      }
+    }
+
+    if (!editToken) {
+      c.header('Cache-Control', 'no-store');
+      return c.json(
+        {
+          error: {
+            message: '有効な特権管理トークン(editToken)が指定されていません。',
+          },
+        },
+        400,
+      );
+    }
+
+    let doc: Pick<
+      DocumentRecord,
+      | 'id'
+      | 'status'
+      | 'expires_at'
+      | 'edit_token_hash'
+      | 'owner_user_id'
+      | 'owner_provider'
+    > | null = null;
+
+    try {
+      doc = await c.env.DB.prepare(
+        `SELECT
+          id,
+          status,
+          expires_at,
+          edit_token_hash,
+          owner_user_id,
+          owner_provider
+        FROM documents
+        WHERE id = ?
+        LIMIT 1`,
+      )
+        .bind(id)
+        .first();
+    } catch (error) {
+      console.error('D1ドキュメントClaim参照エラー:', error);
+      c.header('Cache-Control', 'no-store');
+      return c.json(
+        {
+          error: {
+            message: 'データベースの参照に失敗しました。',
+          },
+        },
+        500,
+      );
+    }
+
+    if (!doc || doc.status === 'deleted') {
+      c.header('Cache-Control', 'no-store');
+      return c.json(
+        {
+          error: {
+            message: 'ドキュメントが見つかりません。',
+          },
+        },
+        404,
+      );
+    }
+
+    if (doc.status === 'suspended') {
+      c.header('Cache-Control', 'no-store');
+      return c.json(
+        {
+          error: {
+            message: '規約違反の通報により凍結されています。',
+          },
+        },
+        403,
+      );
+    }
+
+    const isEditMatched = await verifyTokenHash(editToken, doc.edit_token_hash);
+    if (!isEditMatched) {
+      c.header('Cache-Control', 'no-store');
+      return c.json(
+        {
+          error: {
+            message: '操作を行う権限がありません。',
+          },
+        },
+        403,
+      );
+    }
+
+    if (
+      doc.owner_user_id &&
+      (doc.owner_user_id !== currentUser.providerUserId ||
+        doc.owner_provider !== currentUser.provider)
+    ) {
+      c.header('Cache-Control', 'no-store');
+      return c.json(
+        {
+          error: {
+            message: 'このドキュメントは既に別のアカウントに所有されています。',
+          },
+        },
+        409,
+      );
+    }
+
+    const nowIso = new Date().toISOString();
+
+    if (
+      doc.owner_user_id === currentUser.providerUserId &&
+      doc.owner_provider === currentUser.provider
+    ) {
+      c.header('Cache-Control', 'no-store');
+      const responsePayload: DocumentClaimResponse = {
+        success: true,
+        id: doc.id,
+        ownerUserId: currentUser.providerUserId,
+        ownerProvider: currentUser.provider,
+        updatedAt: nowIso,
+      };
+      return c.json(responsePayload, 200);
+    }
+
+    try {
+      const updateResult = await c.env.DB.prepare(
+        `UPDATE documents
+        SET owner_user_id = ?,
+            owner_provider = ?,
+            updated_at = ?
+        WHERE id = ?
+          AND status != 'deleted'
+          AND status != 'suspended'
+          AND (owner_user_id IS NULL OR (owner_user_id = ? AND owner_provider = ?))`,
+      )
+        .bind(
+          currentUser.providerUserId,
+          currentUser.provider,
+          nowIso,
+          doc.id,
+          currentUser.providerUserId,
+          currentUser.provider,
+        )
+        .run();
+
+      const changes = updateResult.meta?.changes ?? 0;
+      if (changes === 0) {
+        c.header('Cache-Control', 'no-store');
+        return c.json(
+          {
+            error: {
+              message:
+                'このドキュメントは既に別のアカウントに所有されています。',
+            },
+          },
+          409,
+        );
+      }
+    } catch (error) {
+      console.error('D1ドキュメントClaim更新エラー:', error);
+      c.header('Cache-Control', 'no-store');
+      return c.json(
+        {
+          error: {
+            message: '所有権の移譲処理に失敗しました。',
+          },
+        },
+        500,
+      );
+    }
+
+    c.header('Cache-Control', 'no-store');
+    const responsePayload: DocumentClaimResponse = {
+      success: true,
+      id: doc.id,
+      ownerUserId: currentUser.providerUserId,
+      ownerProvider: currentUser.provider,
+      updatedAt: nowIso,
+    };
     return c.json(responsePayload, 200);
   },
 );
