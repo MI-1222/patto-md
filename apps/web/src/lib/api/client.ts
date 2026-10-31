@@ -4,6 +4,8 @@ import {
   type DocumentCommitResponse,
   type DocumentListResponse,
   type DocumentResponse,
+  type DocumentUpdateRequest,
+  type DocumentUpdateResponse,
   type UploadSignFileItem,
   type UploadSignResponse,
 } from '@patto-md/shared';
@@ -237,6 +239,65 @@ export async function commitDocument(
   }
 
   return (await response.json()) as DocumentCommitResponse;
+}
+
+/**
+ * ドキュメント更新API (`PUT /api/documents/:id`) を呼び出す。
+ *
+ * @param id - ドキュメントID(`Slug`)。
+ * @param payload - 更新パラメータ。
+ * @param token - 認可トークン(`edit` または `modify` トークン)。
+ * @param baseUrl - 接続先APIベースURL。未指定時は `getApiBaseUrl()` を使用する。
+ * @returns ドキュメント更新レスポンス。
+ */
+export async function updateDocument(
+  id: string,
+  payload: DocumentUpdateRequest,
+  token: string,
+  baseUrl: string = getApiBaseUrl(),
+): Promise<DocumentUpdateResponse> {
+  /** ドキュメント更新APIのエンドポイントURL。 */
+  const url = `${baseUrl}/api/documents/${id}`;
+
+  /** 認可トークンを含むリクエストヘッダー。 */
+  const headers: Record<string, string> = {
+    'Content-Type': 'application/json',
+    Authorization: `Bearer ${token}`,
+  };
+
+  let response: Response;
+  try {
+    response = await fetch(url, {
+      method: 'PUT',
+      headers,
+      body: JSON.stringify(payload),
+    });
+  } catch (error) {
+    const detail = error instanceof Error ? error.message : String(error);
+    throw new ApiError(
+      `ドキュメント更新APIへの接続に失敗しました: ${detail}`,
+      0,
+    );
+  }
+
+  if (!response.ok) {
+    let errorMessage = 'ドキュメントの更新に失敗しました。';
+    let details: unknown;
+    try {
+      const errorJson = (await response.json()) as {
+        error?: { message?: string; details?: unknown };
+      };
+      if (errorJson.error?.message) {
+        errorMessage = errorJson.error.message;
+      }
+      details = errorJson.error?.details;
+    } catch {
+      /* noop */
+    }
+    throw new ApiError(errorMessage, response.status, details);
+  }
+
+  return (await response.json()) as DocumentUpdateResponse;
 }
 
 /** ドキュメント取得APIのレスポンス型。 */
