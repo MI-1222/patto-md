@@ -15,14 +15,13 @@ import {
   type ReconciliationResult,
   type ResolvedAsset,
 } from '../markdown';
+import { compressImage, type CompressedImageResult } from '../storage';
 import type { ParsedFiles } from '../../components/dropzone/types';
 
-/**
- * パイプライン進行進捗情報の定義。
- */
+/** パイプライン進行進捗情報の定義。 */
 export interface PublishProgressInfo {
   /** 進行ステージ。 */
-  stage: 'signing' | 'uploading' | 'committing';
+  stage: 'optimizing' | 'signing' | 'uploading' | 'committing';
   /** 完了件数。 */
   current: number;
   /** 全体件数。 */
@@ -33,9 +32,7 @@ export interface PublishProgressInfo {
   percent: number;
 }
 
-/**
- * ドキュメント公開実行パラメータの定義。
- */
+/** ドキュメント公開実行パラメータの定義。 */
 export interface ExecutePublishPipelineParams {
   /** ドロップおよび分類済みのファイル群。 */
   parsedFiles: ParsedFiles;
@@ -155,22 +152,60 @@ export async function executePublishPipeline(
     }
   }
 
+  const totalAssets = uniqueResolvedAssets.length;
+  /** 解決済み画像アセットの圧縮・最適化結果マップ。 */
+  const compressedAssetMap = new Map<string, CompressedImageResult>();
+
+  if (totalAssets > 0) {
+    onProgress?.({
+      stage: 'optimizing',
+      current: 0,
+      total: totalAssets,
+      message: `画像を最適化中 (0/${totalAssets})...`,
+      percent: 5,
+    });
+
+    for (let i = 0; i < totalAssets; i++) {
+      const asset = uniqueResolvedAssets[i];
+      const result = await compressImage(asset.file);
+      compressedAssetMap.set(asset.relativePath, result);
+
+      const percent = 5 + Math.floor(((i + 1) / totalAssets) * 15);
+      onProgress?.({
+        stage: 'optimizing',
+        current: i + 1,
+        total: totalAssets,
+        message: `画像を最適化中 (${i + 1}/${totalAssets})...`,
+        percent,
+      });
+    }
+  }
+
   onProgress?.({
     stage: 'signing',
     current: 0,
     total: uniqueResolvedAssets.length + 1,
     message: '署名を発行中...',
-    percent: 10,
+    percent: 25,
   });
 
   const fileSignItems: UploadSignFileItem[] = [
     ...uniqueResolvedAssets.map((asset) => {
-      const fileName =
+      const compressed = compressedAssetMap.get(asset.relativePath);
+      const fallbackName =
         getBasename(asset.relativePath) || asset.file.name || 'image';
+      const fileName = compressed ? compressed.fileName : fallbackName;
+      const fileSize = compressed ? compressed.size : asset.file.size;
+      const mimeType = (
+        compressed?.wasCompressed
+          ? compressed.mimeType
+          : resolveFileMimeType(asset.file)
+      ) as UploadSignFileItem['type'];
+
       return {
         name: fileName,
-        size: asset.file.size,
-        type: resolveFileMimeType(asset.file),
+        size: fileSize,
+        type: mimeType,
       };
     }),
     {
@@ -221,11 +256,15 @@ export async function executePublishPipeline(
   }[] = [
     ...uniqueResolvedAssets.map((asset) => {
       const sign = assetSignMap.get(asset.relativePath)!;
-      const mimeType = resolveFileMimeType(asset.file);
+      const compressed = compressedAssetMap.get(asset.relativePath);
+      const body = compressed ? compressed.blob : asset.file;
+      const mimeType = compressed?.wasCompressed
+        ? compressed.mimeType
+        : resolveFileMimeType(asset.file);
       return {
         name: sign.fileName,
         uploadUrl: sign.uploadUrl,
-        body: asset.file,
+        body,
         mimeType,
       };
     }),
@@ -282,11 +321,16 @@ export async function executePublishPipeline(
   const attachmentsPayload: DocumentAttachmentCommit[] =
     uniqueResolvedAssets.map((asset) => {
       const sign = assetSignMap.get(asset.relativePath)!;
+      const compressed = compressedAssetMap.get(asset.relativePath);
+      const fileSize = compressed ? compressed.size : asset.file.size;
+      const mimeType = compressed?.wasCompressed
+        ? compressed.mimeType
+        : resolveFileMimeType(asset.file);
       return {
         id: sign.fileId,
         fileName: sign.fileName,
-        fileSize: asset.file.size,
-        mimeType: resolveFileMimeType(asset.file),
+        fileSize,
+        mimeType,
         r2Key: sign.r2Key,
       };
     });
