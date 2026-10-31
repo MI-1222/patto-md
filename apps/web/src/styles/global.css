@@ -25,26 +25,62 @@
   }
 }
 
-.heading-anchor {
-  margin-left: 0.5rem;
+.line-block {
+  position: relative;
+}
+
+/* 左側パーマリンクアンカー(見出しおよび本文共通)。 */
+.line-anchor {
+  position: absolute;
+  left: -1.75rem;
+  top: 0.15rem;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 1.25rem;
+  height: 1.25rem;
   opacity: 0;
-  text-decoration: none;
+  text-decoration: none !important;
   color: #71717a;
-  transition: opacity 0.15s ease-in-out;
+  user-select: none;
+  cursor: pointer;
+  border-radius: 0.25rem;
+  transition:
+    opacity 0.15s ease-in-out,
+    color 0.15s ease-in-out,
+    background-color 0.15s ease-in-out;
   scroll-margin-top: 5rem;
 }
 
-h1:hover .heading-anchor,
-h2:hover .heading-anchor,
-h3:hover .heading-anchor,
-h4:hover .heading-anchor,
-h5:hover .heading-anchor,
-h6:hover .heading-anchor {
+/* 見出し要素内のアンカー中央揃え。 */
+:is(h1, h2, h3, h4, h5, h6).line-block > .line-anchor,
+.line-block:is(h1, h2, h3, h4, h5, h6) > .line-anchor,
+.heading-anchor {
+  top: 50%;
+  transform: translateY(-50%);
+}
+
+.line-anchor-icon {
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+  font-size: 0.85em;
+  font-weight: 500;
+  line-height: 1;
+}
+
+/* ホバー時またはキーボードフォーカス時の表示。 */
+.line-block:hover > .line-anchor,
+.line-anchor:focus-visible {
   opacity: 1;
 }
 
-.heading-anchor:hover {
+.line-anchor:hover {
   color: #60a5fa;
+  background-color: rgba(96, 165, 250, 0.12);
+}
+
+.line-anchor:focus-visible {
+  outline: 2px solid #60a5fa;
+  outline-offset: 1px;
 }
 
 pre[class*='language-'] {
@@ -115,11 +151,45 @@ code[class*='language-'] {
   color: #fbbf24;
 }
 
+/* コード行および行番号リンクスタイル。 */
+
+[data-line],
+[data-line-start],
+.code-line {
+  scroll-margin-top: 5rem;
+}
+
 .code-line {
   display: block;
   padding-left: 0.5rem;
   padding-right: 0.5rem;
   border-left: 3px solid transparent;
+  cursor: text;
+  transition:
+    background-color 0.15s ease,
+    border-color 0.15s ease;
+}
+
+.code-line:hover {
+  background-color: rgba(255, 255, 255, 0.04);
+}
+
+.line-number {
+  display: inline-block;
+  min-width: 1.5rem;
+  text-align: right;
+  margin-right: 1.25rem;
+  margin-left: -0.25rem;
+  color: #52525b;
+  cursor: pointer;
+  user-select: none;
+  font-family: inherit;
+  transition: color 0.15s ease;
+}
+
+.line-number:hover {
+  color: #93c5fd;
+  text-decoration: underline;
 }
 
 .code-line.inserted {
@@ -137,14 +207,52 @@ code[class*='language-'] {
   border-left-color: #60a5fa;
 }
 
-.line-number::before {
-  display: inline-block;
-  width: 1rem;
-  text-align: right;
-  margin-right: 1rem;
+/* ディープリンク選択時のハイライトアニメーション。 */
+.line-highlight {
+  background-color: rgba(59, 130, 246, 0.15) !important;
+  border-left-color: #3b82f6 !important;
+  animation: line-pulse 1.2s ease-out 1;
+}
+
+/* テーブルコンテナおよびスクロールラッパー。 */
+.table-container {
+  position: relative;
+  margin-top: 1.5rem;
+  margin-bottom: 1.5rem;
+}
+
+.table-scroll {
+  overflow-x: auto;
+  border-radius: 0.375rem;
+}
+
+.table-container > .line-anchor {
+  top: 0.5rem;
+}
+
+/* 通常ブロック要素(段落・リスト等)に対するハイライト表示。 */
+p.line-highlight,
+blockquote.line-highlight,
+ul.line-highlight,
+ol.line-highlight,
+li.line-highlight,
+table.line-highlight,
+.table-container.line-highlight,
+tr.line-highlight {
+  background-color: rgba(59, 130, 246, 0.1) !important;
+  box-shadow: inset 3px 0 0 #3b82f6;
+  padding-left: 0.5rem;
   margin-left: -0.5rem;
-  color: #52525b;
-  content: attr(line);
+  border-radius: 0.25rem;
+}
+
+@keyframes line-pulse {
+  0% {
+    background-color: rgba(59, 130, 246, 0.35);
+  }
+  100% {
+    background-color: rgba(59, 130, 246, 0.15);
+  }
 }
 
 /* --- Mermaid / Pele ダイアグラム描画スタイル --- */
