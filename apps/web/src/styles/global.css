@@ -189,3 +189,21 @@ code[class*='language-'] {
   max-width: 100%;
   height: auto;
 }
+
+/* 未描画状態(レンダリング前)のFOUC・CLS抑制プレースホルダースタイル */
+.mermaid-block:not([data-mermaid-rendered='true']) {
+  min-height: 7rem;
+}
+
+.mermaid-block:not([data-mermaid-rendered='true']) pre.mermaid {
+  padding: 1.25rem;
+  margin: 0;
+  border: none;
+  background: transparent;
+  color: #71717a;
+  font-size: 0.75rem;
+  line-height: 1.4;
+  overflow: hidden;
+  max-height: 7.5rem;
+  opacity: 0.6;
+}
