@@ -1,4 +1,5 @@
 import React, { useState, useCallback, useMemo, useEffect } from 'react';
+import type { DocumentVisibility } from '@patto-md/shared';
 import {
   CopyIcon,
   CheckIcon,
@@ -10,6 +11,7 @@ import {
   RenewIcon,
   ShieldCheckIcon,
   KeyIcon,
+  LockIcon,
 } from '../svg/ActionIcons';
 import {
   consumeTokenFromUrlHash,
@@ -28,6 +30,8 @@ export interface DocumentActionBarProps {
   expiresAt: string | null;
   /** 作成日時文字列(ISO 8601形式)。 */
   createdAt: string;
+  /** ドキュメント公開範囲(任意)。 */
+  visibility?: DocumentVisibility;
   /** 編集ボタン押下時のコールバック(任意)。 */
   onEdit?: () => void;
   /** 有効期限延長ボタン押下時のコールバック(任意)。 */
@@ -101,6 +105,7 @@ export const DocumentActionBar: React.FC<DocumentActionBarProps> = ({
   rawMarkdown,
   expiresAt,
   createdAt,
+  visibility,
   onEdit,
   onRenew,
   onDelete,
@@ -244,6 +249,16 @@ export const DocumentActionBar: React.FC<DocumentActionBarProps> = ({
             <ClockIcon className="size-3" />
             <span>{remainingText}</span>
           </div>
+
+          {visibility === 'protected' && (
+            <div
+              className="inline-flex items-center gap-1 rounded-full border border-amber-500/30 bg-amber-500/10 px-2 py-0.5 text-xs font-medium text-amber-300"
+              title="パスコードで保護されたドキュメント"
+            >
+              <LockIcon className="size-3 text-amber-400" />
+              <span>保護中</span>
+            </div>
+          )}
 
           {isMounted && hasManagementPermission && (
             <div

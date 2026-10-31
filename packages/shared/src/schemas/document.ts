@@ -1,9 +1,12 @@
 import { z } from 'zod';
 import {
+  DOCUMENT_VISIBILITIES,
   EXPIRATION_PRESETS,
+  MAX_PASSCODE_LENGTH,
   MAX_SINGLE_FILE_SIZE,
   MAX_TITLE_LENGTH,
   MAX_TOTAL_FILE_SIZE,
+  MIN_PASSCODE_LENGTH,
   MIN_TITLE_LENGTH,
   SLUG_PATTERN,
 } from '../constants/limits.ts';
@@ -42,38 +45,67 @@ export type DocumentAttachmentCommit = z.infer<
   typeof documentAttachmentCommitSchema
 >;
 
-/** ドキュメント確定コミット要求(POST /api/documents)のバリデーションスキーマ。 */
-export const documentCommitRequestSchema = z.object({
-  /** ドキュメントのタイトル。 */
-  title: z
-    .string()
-    .trim()
-    .min(MIN_TITLE_LENGTH, 'タイトルは必須である。')
-    .max(
-      MAX_TITLE_LENGTH,
-      `タイトルは${MAX_TITLE_LENGTH}文字以下である必要がある。`,
-    ),
+/** ドキュメント確定コミット要求(`POST /api/documents`)のバリデーションスキーマ。 */
+export const documentCommitRequestSchema = z
+  .object({
+    /** ドキュメントのタイトル。 */
+    title: z
+      .string()
+      .trim()
+      .min(MIN_TITLE_LENGTH, 'タイトルは必須である。')
+      .max(
+        MAX_TITLE_LENGTH,
+        `タイトルは${MAX_TITLE_LENGTH}文字以下である必要がある。`,
+      ),
 
-  /** 本文の要約・抜粋テキスト(任意)。 */
-  description: z
-    .string()
-    .max(500, '抜粋は500文字以下である必要がある。')
-    .optional(),
+    /** 本文の要約・抜粋テキスト(任意)。 */
+    description: z
+      .string()
+      .max(500, '抜粋は500文字以下である必要がある。')
+      .optional(),
 
-  /** R2にアップロード済みのMarkdown本文のオブジェクトキー。 */
-  contentR2Key: z.string().min(1, '本文のR2キーは必須である。'),
+    /** R2にアップロード済みのMarkdown本文のオブジェクトキー。 */
+    contentR2Key: z.string().min(1, '本文のR2キーは必須である。'),
 
-  /** ドキュメントに紐づく添付ファイル情報の一覧。 */
-  attachments: z.array(documentAttachmentCommitSchema).default([]),
+    /** ドキュメントに紐づく添付ファイル情報の一覧。 */
+    attachments: z.array(documentAttachmentCommitSchema).default([]),
 
-  /** 有効期限プリセット指定。 */
-  expiration: z.enum(EXPIRATION_PRESETS, {
-    error: '無効な有効期限指定である。',
-  }),
-});
+    /** 有効期限プリセット指定。 */
+    expiration: z.enum(EXPIRATION_PRESETS, {
+      error: '無効な有効期限指定である。',
+    }),
+
+    /** ドキュメント公開範囲。 */
+    visibility: z.enum(DOCUMENT_VISIBILITIES).default('public'),
+
+    /** パスコード保護時の平文パスコード(任意)。 */
+    passcode: z
+      .string()
+      .max(
+        MAX_PASSCODE_LENGTH,
+        `パスコードは${MAX_PASSCODE_LENGTH}文字以下である必要がある。`,
+      )
+      .optional(),
+  })
+  .refine(
+    (data) => {
+      if (data.visibility === 'protected') {
+        return (
+          typeof data.passcode === 'string' &&
+          data.passcode.length >= MIN_PASSCODE_LENGTH &&
+          data.passcode.length <= MAX_PASSCODE_LENGTH
+        );
+      }
+      return !data.passcode || data.passcode.trim().length === 0;
+    },
+    {
+      message: `パスコード保護設定時は${MIN_PASSCODE_LENGTH}〜${MAX_PASSCODE_LENGTH}文字のパスコードが必須である。`,
+      path: ['passcode'],
+    },
+  );
 
 /** ドキュメント確定コミット要求の型。 */
-export type DocumentCommitRequest = z.infer<typeof documentCommitRequestSchema>;
+export type DocumentCommitRequest = z.input<typeof documentCommitRequestSchema>;
 
 /** ドキュメント確定コミットレスポンス(`POST /api/documents`)のスキーマ。 */
 export const documentCommitResponseSchema = z.object({
@@ -97,10 +129,10 @@ export const documentCommitResponseSchema = z.object({
     .regex(MODIFY_TOKEN_PATTERN, '無効なModify Token形式である。'),
 
   /** 有効期限日時(ISO 8601文字列、無期限時は `null`)。 */
-  expiresAt: z.string().datetime().nullable(),
+  expiresAt: z.iso.datetime().nullable(),
 
   /** 作成日時(ISO 8601文字列)。 */
-  createdAt: z.string().datetime(),
+  createdAt: z.iso.datetime(),
 });
 
 /** ドキュメント確定コミットレスポンスの型。 */
@@ -108,7 +140,7 @@ export type DocumentCommitResponse = z.infer<
   typeof documentCommitResponseSchema
 >;
 
-/** ドキュメント詳細閲覧レスポンス(GET /api/documents/:id)のスキーマ。 */
+/** ドキュメント詳細閲覧レスポンス(`GET /api/documents/:id`)のスキーマ。 */
 export const documentResponseSchema = z.object({
   /** ドキュメントID(Slug)。 */
   id: z.string(),
@@ -119,17 +151,23 @@ export const documentResponseSchema = z.object({
   /** Markdown本文の文字列。 */
   content: z.string(),
 
+  /** ドキュメント公開範囲。 */
+  visibility: z.enum(DOCUMENT_VISIBILITIES).default('public'),
+
+  /** パスコード保護状態フラグ(未解除時は `true`)。 */
+  isProtected: z.boolean().optional(),
+
   /** 公開ステータス。 */
   status: z.enum(['published', 'expired', 'deleted', 'suspended']),
 
-  /** 有効期限日時(ISO 8601文字列、無期限時はnull)。 */
-  expiresAt: z.string().datetime().nullable(),
+  /** 有効期限日時(ISO 8601文字列、無期限時は `null`)。 */
+  expiresAt: z.iso.datetime().nullable(),
 
   /** 作成日時(ISO 8601文字列)。 */
-  createdAt: z.string().datetime(),
+  createdAt: z.iso.datetime(),
 
   /** 最終更新日時(ISO 8601文字列)。 */
-  updatedAt: z.string().datetime(),
+  updatedAt: z.iso.datetime(),
 
   /** 添付ファイル一覧。 */
   attachments: z.array(documentAttachmentCommitSchema),
@@ -150,10 +188,10 @@ export const documentListItemSchema = z.object({
   description: z.string().nullable(),
 
   /** 有効期限日時(ISO 8601文字列、無期限時は `null`)。 */
-  expiresAt: z.string().datetime().nullable(),
+  expiresAt: z.iso.datetime().nullable(),
 
   /** 作成日時(ISO 8601文字列)。 */
-  createdAt: z.string().datetime(),
+  createdAt: z.iso.datetime(),
 
   /** 添付ファイル数。 */
   attachmentCount: z.number().int().nonnegative(),
@@ -210,6 +248,18 @@ export const documentUpdateRequestSchema = z
 
     /** ドキュメントに紐づく添付ファイル情報の一覧。 */
     attachments: z.array(documentAttachmentCommitSchema).default([]),
+
+    /** ドキュメント公開範囲(未指定時は既存設定を維持)。 */
+    visibility: z.enum(DOCUMENT_VISIBILITIES).optional(),
+
+    /** パスコード保護時の平文パスコード(未指定時は既存設定を維持)。 */
+    passcode: z
+      .string()
+      .max(
+        MAX_PASSCODE_LENGTH,
+        `パスコードは${MAX_PASSCODE_LENGTH}文字以下である必要がある。`,
+      )
+      .optional(),
   })
   .refine(
     (data) => {
@@ -222,6 +272,21 @@ export const documentUpdateRequestSchema = z
     {
       message: '添付ファイルの合計サイズが上限を超過している。',
       path: ['attachments'],
+    },
+  )
+  .refine(
+    (data) => {
+      if (data.passcode !== undefined && data.passcode.trim().length > 0) {
+        return (
+          data.passcode.trim().length >= MIN_PASSCODE_LENGTH &&
+          data.passcode.trim().length <= MAX_PASSCODE_LENGTH
+        );
+      }
+      return true;
+    },
+    {
+      message: `パスコードは${MIN_PASSCODE_LENGTH}〜${MAX_PASSCODE_LENGTH}文字である必要がある。`,
+      path: ['passcode'],
     },
   );
 
@@ -239,17 +304,20 @@ export const documentUpdateResponseSchema = z.object({
   /** ドキュメントのタイトル。 */
   title: z.string(),
 
+  /** ドキュメント公開範囲。 */
+  visibility: z.enum(DOCUMENT_VISIBILITIES).default('public'),
+
   /** 本文の要約・抜粋テキスト(`null` の場合は未設定)。 */
   description: z.string().nullable(),
 
   /** 有効期限日時(ISO 8601文字列、無期限時は `null`)。 */
-  expiresAt: z.string().datetime().nullable(),
+  expiresAt: z.iso.datetime().nullable(),
 
   /** 作成日時(ISO 8601文字列)。 */
-  createdAt: z.string().datetime(),
+  createdAt: z.iso.datetime(),
 
   /** 最終更新日時(ISO 8601文字列)。 */
-  updatedAt: z.string().datetime(),
+  updatedAt: z.iso.datetime(),
 });
 
 /** ドキュメント更新レスポンスの型。 */
@@ -277,10 +345,10 @@ export const documentRenewResponseSchema = z.object({
   url: z.string(),
 
   /** 更新後の有効期限日時(ISO 8601文字列、無期限時は `null`)。 */
-  expiresAt: z.string().datetime().nullable(),
+  expiresAt: z.iso.datetime().nullable(),
 
   /** 最終更新日時(ISO 8601文字列)。 */
-  updatedAt: z.string().datetime(),
+  updatedAt: z.iso.datetime(),
 });
 
 /** ドキュメント再公開・有効期限延長レスポンスの型。 */
@@ -299,3 +367,64 @@ export const documentDeleteResponseSchema = z.object({
 export type DocumentDeleteResponse = z.infer<
   typeof documentDeleteResponseSchema
 >;
+
+/** パスコード照合要求(`POST /api/documents/:id/verify-passcode`)のスキーマ。 */
+export const documentVerifyPasscodeRequestSchema = z.object({
+  /** 照合対象のパスコード文字列。 */
+  passcode: z.string().min(1, 'パスコードは必須である。'),
+});
+
+/** パスコード照合要求の型。 */
+export type DocumentVerifyPasscodeRequest = z.infer<
+  typeof documentVerifyPasscodeRequestSchema
+>;
+
+/** パスコード照合レスポンス(`POST /api/documents/:id/verify-passcode`)のスキーマ。 */
+export const documentVerifyPasscodeResponseSchema = z.object({
+  /** 照合成功フラグ。 */
+  success: z.boolean(),
+
+  /** 発行された閲覧認証トークン(`JWT`)。 */
+  token: z.string().optional(),
+
+  /** トークンの有効期限日時(ISO 8601文字列)。 */
+  expiresAt: z.iso.datetime().optional(),
+});
+
+/** パスコード照合レスポンスの型。 */
+export type DocumentVerifyPasscodeResponse = z.infer<
+  typeof documentVerifyPasscodeResponseSchema
+>;
+
+/** 保護ドキュメントの未認証時情報スキーマ。 */
+export const documentProtectedInfoSchema = z.object({
+  /** ドキュメントID(`Slug`)。 */
+  id: z.string(),
+
+  /** ドキュメントのタイトル。 */
+  title: z.string(),
+
+  /** 公開範囲(`protected`)。 */
+  visibility: z.literal('protected'),
+
+  /** 保護状態フラグ(`true`)。 */
+  isProtected: z.literal(true),
+
+  /** 公開ステータス。 */
+  status: z.enum(['published', 'expired', 'deleted', 'suspended']),
+
+  /** 有効期限日時(ISO 8601文字列、無期限時は `null`)。 */
+  expiresAt: z.iso.datetime().nullable(),
+
+  /** 作成日時(ISO 8601文字列)。 */
+  createdAt: z.iso.datetime(),
+
+  /** 最終更新日時(ISO 8601文字列)。 */
+  updatedAt: z.iso.datetime(),
+
+  /** 添付ファイル一覧(未認証時は空配列)。 */
+  attachments: z.array(documentAttachmentCommitSchema).default([]),
+});
+
+/** 保護ドキュメントの未認証時情報の型。 */
+export type DocumentProtectedInfo = z.infer<typeof documentProtectedInfoSchema>;

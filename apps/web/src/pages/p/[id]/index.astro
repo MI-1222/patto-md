@@ -1,0 +1,114 @@
+---
+/**
+ * ドキュメント閲覧画面のエントリーポイント。
+ *
+ * エッジSSR上でAPIからMarkdown本文とメタデータを取得し、サーバーサイドでサニタイズ済みHTMLに変換して配信する。
+ * パスコード保護ドキュメントの場合は認証状態を判定し、未認証時は本文レンダリングを遮断してロック画面を表示する。
+ * 有効期限または保護状態に応じた `Cache-Control` ヘッダーの設定と、動的OGPメタタグの出力を行う。
+ */
+/* eslint-disable astro/no-set-html-directive */
+import BaseLayout from '../../../layouts/BaseLayout.astro';
+import { SLUG_PATTERN } from '@patto-md/shared';
+import {
+  fetchDocument,
+  getFetcher,
+  resolveServerApiBaseUrl,
+} from '../../../lib/api';
+import { renderMarkdown, extractDescription } from '../../../lib/markdown';
+import {
+  DocumentActionBar,
+  PasscodeUnlockCard,
+} from '../../../components/viewer';
+
+const { id } = Astro.params;
+
+if (!id || !SLUG_PATTERN.test(id)) {
+  return Astro.redirect('/404');
+}
+
+/** サーバーサイド実行時に解決されたAPIベースURL。 */
+const apiBaseUrl = resolveServerApiBaseUrl(Astro.locals);
+/** サーバーサイド実行時に解決された `Fetcher`(`Service Binding` 優先)。 */
+const fetcher = getFetcher(Astro.locals);
+
+/** クライアントリクエストから受け取った `Cookie` ヘッダー。 */
+const cookieHeader = Astro.request.headers.get('cookie');
+
+let docData;
+try {
+  docData = await fetchDocument(id, apiBaseUrl, fetcher, {
+    cookie: cookieHeader,
+  });
+} catch (error) {
+  console.error('SSR fetchDocument エラー:', error);
+  return Astro.redirect('/404');
+}
+
+const { document: doc, cacheControl } = docData;
+
+if (cacheControl) {
+  Astro.response.headers.set('Cache-Control', cacheControl);
+}
+
+const isProtected = Boolean(doc.isProtected);
+
+/** 画面タイトルおよびOGPタイトル。 */
+const pageTitle = isProtected
+  ? 'パスコード保護されたドキュメント - patto-md'
+  : `${doc.title} - patto-md`;
+
+/** OGP用のドキュメント要約テキスト。 */
+const description = isProtected
+  ? 'このドキュメントを閲覧するにはパスコードが必要です。'
+  : extractDescription(doc.content, 140) ||
+    'patto-mdで共有されたMarkdownドキュメント。';
+
+/** OGP画像URL(先頭の添付画像、未設定時はデフォルト画像)。 */
+let ogImage = '/ogp.jpeg';
+if (!isProtected && doc.attachments.length > 0) {
+  const firstAttachment = doc.attachments[0];
+  ogImage = `${apiBaseUrl}/api/assets/${firstAttachment.r2Key}`;
+}
+
+/** サーバーサイドでHTMLに変換されたMarkdown本文(保護時は空文字列)。 */
+let renderedHtml = '';
+if (!isProtected && doc.content) {
+  const rendered = await renderMarkdown(doc.content, {
+    assetBaseUrl: apiBaseUrl,
+  });
+  renderedHtml = rendered.html;
+}
+---
+
+<BaseLayout title={pageTitle} description={description} image={ogImage}>
+  {isProtected ? (
+    <PasscodeUnlockCard client:load documentId={doc.id} title={doc.title} />
+  ) : (
+    <div class="mx-auto max-w-4xl px-4 py-8 sm:px-6 sm:py-12">
+      <div class="overflow-hidden rounded-xl border border-neutral-800 bg-neutral-900/40 shadow-2xl backdrop-blur-sm">
+        <header class="border-b border-neutral-800 p-6 sm:p-8">
+          <h1 class="text-2xl font-bold tracking-tight text-neutral-100 sm:text-3xl">
+            {doc.title}
+          </h1>
+        </header>
+
+        <DocumentActionBar
+          client:load
+          documentId={doc.id}
+          rawMarkdown={doc.content}
+          expiresAt={doc.expiresAt}
+          createdAt={doc.createdAt}
+          visibility={doc.visibility}
+        />
+
+        <div class="px-6 py-8 sm:px-8 sm:py-10">
+          <!-- eslint-disable-next-line astro/no-set-html-directive -->
+          <article
+            class="prose prose-invert max-w-none text-neutral-200 [&>h1:first-child]:hidden prose-headings:font-bold prose-headings:tracking-tight prose-headings:text-neutral-100 prose-a:text-blue-400 prose-a:no-underline hover:prose-a:underline prose-code:rounded prose-code:bg-neutral-800 prose-code:px-1.5 prose-code:py-0.5 prose-code:font-mono prose-code:text-sm prose-code:text-neutral-200 prose-pre:border prose-pre:border-neutral-800 prose-pre:bg-neutral-950/80 prose-img:rounded-lg prose-table:overflow-x-auto"
+            set:html={renderedHtml}
+          />
+        </div>
+      </div>
+    </div>
+  )}
+</BaseLayout>

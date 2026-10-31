@@ -6,6 +6,7 @@ import {
   type DocumentResponse,
   type DocumentUpdateRequest,
   type DocumentUpdateResponse,
+  type DocumentVerifyPasscodeResponse,
   type UploadSignFileItem,
   type UploadSignResponse,
 } from '@patto-md/shared';
@@ -310,24 +311,39 @@ export interface FetchDocumentResult {
 
 /**
  * ドキュメント詳細取得API (`GET /api/documents/:id`) を呼び出し、ドキュメント情報とキャッシュ制御ヘッダーを取得する。
+ * パスコード保護ドキュメントで未認証(401)の場合は、本文を秘匿した保護メタデータを透過して返却する。
  *
- * @param id - ドキュメントID(Slug)。
+ * @param id - ドキュメントID(`Slug`)。
  * @param baseUrl - 接続先APIのベースURL。未指定時は `getApiBaseUrl()` の戻り値を使用する。
- * @param customFetch - リクエスト送信に使用するカスタム fetch 関数(Service Binding 等)。
+ * @param customFetch - リクエスト送信に使用するカスタム fetch 関数(`Service Binding` 等)。
+ * @param options - 認証 `Cookie` または `Bearer` トークンなどの追加オプション。
  * @returns ドキュメント詳細および `Cache-Control` ヘッダー値を含むオブジェクト。
  */
 export async function fetchDocument(
   id: string,
   baseUrl: string = getApiBaseUrl(),
   customFetch: typeof fetch = fetch,
+  options?: {
+    cookie?: string | null;
+    token?: string | null;
+  },
 ): Promise<FetchDocumentResult> {
   /** ドキュメント詳細取得APIのエンドポイントURL。 */
   const url = `${baseUrl}/api/documents/${id}`;
+
+  const headers: Record<string, string> = {};
+  if (options?.cookie) {
+    headers.Cookie = options.cookie;
+  }
+  if (options?.token) {
+    headers.Authorization = `Bearer ${options.token}`;
+  }
 
   let response: Response;
   try {
     response = await customFetch(url, {
       method: 'GET',
+      headers,
     });
   } catch (error) {
     const detail = error instanceof Error ? error.message : String(error);
@@ -343,7 +359,16 @@ export async function fetchDocument(
     try {
       const errorJson = (await response.json()) as {
         error?: { message?: string; details?: unknown };
+        document?: DocumentResponse;
       };
+
+      if (response.status === 401 && errorJson.document?.isProtected) {
+        return {
+          document: errorJson.document,
+          cacheControl: 'private, no-cache, no-store',
+        };
+      }
+
       if (errorJson.error?.message) {
         errorMessage = errorJson.error.message;
       }
@@ -363,6 +388,58 @@ export async function fetchDocument(
     document,
     cacheControl,
   };
+}
+
+/**
+ * パスコード照合API (`POST /api/documents/:id/verify-passcode`) を呼び出す。
+ *
+ * @param id - ドキュメントID(`Slug`)。
+ * @param passcode - 入力されたパスコード文字列。
+ * @param baseUrl - 接続先APIベースURL。未指定時は `getApiBaseUrl()` を使用する。
+ * @returns パスコード照合レスポンス。
+ */
+export async function verifyPasscode(
+  id: string,
+  passcode: string,
+  baseUrl: string = getApiBaseUrl(),
+): Promise<DocumentVerifyPasscodeResponse> {
+  const url = `${baseUrl}/api/documents/${id}/verify-passcode`;
+
+  const headers: Record<string, string> = {
+    'Content-Type': 'application/json',
+  };
+
+  let response: Response;
+  try {
+    response = await fetch(url, {
+      method: 'POST',
+      headers,
+      credentials: 'include',
+      body: JSON.stringify({ passcode }),
+    });
+  } catch (error) {
+    const detail = error instanceof Error ? error.message : String(error);
+    throw new ApiError(`パスコード照合APIへの接続に失敗しました: ${detail}`, 0);
+  }
+
+  if (!response.ok) {
+    let errorMessage = 'パスコードの照合に失敗しました。';
+    let details: unknown;
+    try {
+      const errorJson = (await response.json()) as {
+        error?: { message?: string; details?: unknown };
+      };
+      if (errorJson.error?.message) {
+        errorMessage = errorJson.error.message;
+      }
+      details = errorJson.error?.details;
+    } catch {
+      /* noop */
+    }
+    throw new ApiError(errorMessage, response.status, details);
+  }
+
+  return (await response.json()) as DocumentVerifyPasscodeResponse;
 }
 
 /** ドキュメント一覧取得オプションの定義。 */

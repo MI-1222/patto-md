@@ -1,6 +1,7 @@
 import { useState, useCallback, useEffect, useRef } from 'react';
 import type {
   DocumentCommitResponse,
+  DocumentVisibility,
   ExpirationPreset,
 } from '@patto-md/shared';
 import {
@@ -35,6 +36,10 @@ export interface PublishParams {
   markdownContent: string;
   /** 選択された有効期限プリセット。 */
   expiration: ExpirationPreset;
+  /** ドキュメント公開範囲。 */
+  visibility?: DocumentVisibility;
+  /** パスコード保護時の平文パスコード。 */
+  passcode?: string;
   /** 未解決画像のリンク切れ公開を容認するかどうかの真偽値。 */
   allowIncompletePublish?: boolean;
   /** Cloudflare Turnstile ボット検証トークン。 */

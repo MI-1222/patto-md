@@ -94,6 +94,31 @@ export const RATE_LIMIT_DOCUMENT_RENEW_LIMIT = 5;
 /** ドキュメント再公開・有効期限延長APIのレートリミットウィンドウ秒数(1分)。 */
 export const RATE_LIMIT_DOCUMENT_RENEW_WINDOW_SECONDS = 60;
 
+/** パスコード照合APIのレートリミット上限(1分あたりの最大リクエスト数)。 */
+export const RATE_LIMIT_VERIFY_PASSCODE_LIMIT = 5;
+
+/** パスコード照合APIのレートリミットウィンドウ秒数(1分)。 */
+export const RATE_LIMIT_VERIFY_PASSCODE_WINDOW_SECONDS = 60;
+
+/** ドキュメント公開範囲の選択肢リスト。 */
+export const DOCUMENT_VISIBILITIES = [
+  'public',
+  'unlisted',
+  'protected',
+] as const;
+
+/** パスコードの最小文字数。 */
+export const MIN_PASSCODE_LENGTH = 4;
+
+/** パスコードの最大文字数。 */
+export const MAX_PASSCODE_LENGTH = 32;
+
+/** 閲覧認証トークン(`JWT`)の有効期限(秒単位、24時間)。 */
+export const VIEW_TOKEN_EXPIRATION_SECONDS = 86400;
+
+/** パスコード認証 `Cookie` 名のプレフィックス。 */
+export const PASSCODE_AUTH_COOKIE_PREFIX = 'patto_doc_auth_';
+
 /** レートリミット超過時の既定エラーメッセージ。 */
 export const RATE_LIMIT_EXCEEDED_MESSAGE =
   'リクエスト回数の上限を超えました。しばらく待ってから再試行してください。';

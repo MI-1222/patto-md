@@ -6,6 +6,7 @@ import {
   commitDocument,
   fetchDocument,
   fetchDocuments,
+  verifyPasscode,
   ApiError,
 } from '../client';
 import type {
@@ -293,6 +294,126 @@ describe('APIクライアント(src/lib/api/client.ts)', () => {
       await expect(
         fetchDocument('NotExist1234', 'http://localhost:8787'),
       ).rejects.toThrow('ドキュメントが見つかりません。');
+    });
+
+    it('`Cookie` オプションが指定された場合、リクエストヘッダーに `Cookie` を付与して送信する。', async () => {
+      const mockDocument = {
+        id: 'AbCdEf123456',
+        title: 'テスト',
+        content: '本文',
+        visibility: 'protected',
+        status: 'published',
+        expiresAt: null,
+        createdAt: '2026-10-30T00:00:00.000Z',
+        updatedAt: '2026-10-30T00:00:00.000Z',
+        attachments: [],
+      };
+
+      globalThis.fetch = vi.fn().mockResolvedValue({
+        ok: true,
+        status: 200,
+        headers: new Headers(),
+        json: async () => mockDocument,
+      } as unknown as Response);
+
+      await fetchDocument('AbCdEf123456', 'http://localhost:8787', fetch, {
+        cookie: 'patto_doc_auth_AbCdEf123456=dummy.jwt.token',
+      });
+
+      expect(globalThis.fetch).toHaveBeenCalledWith(
+        'http://localhost:8787/api/documents/AbCdEf123456',
+        expect.objectContaining({
+          method: 'GET',
+          headers: {
+            Cookie: 'patto_doc_auth_AbCdEf123456=dummy.jwt.token',
+          },
+        }),
+      );
+    });
+
+    it('パスコード保護中で 401 が返却された場合、例外にならず保護情報を透過して返却する。', async () => {
+      const protectedDoc = {
+        id: 'ProtDoc12345',
+        title: '保護された文書',
+        content: '',
+        visibility: 'protected',
+        isProtected: true,
+        status: 'published',
+        expiresAt: null,
+        createdAt: '2026-10-30T00:00:00.000Z',
+        updatedAt: '2026-10-30T00:00:00.000Z',
+        attachments: [],
+      };
+
+      globalThis.fetch = vi.fn().mockResolvedValue({
+        ok: false,
+        status: 401,
+        headers: new Headers(),
+        json: async () => ({
+          error: {
+            message: 'このドキュメントはパスコードで保護されています。',
+          },
+          document: protectedDoc,
+        }),
+      } as unknown as Response);
+
+      const result = await fetchDocument(
+        'ProtDoc12345',
+        'http://localhost:8787',
+      );
+
+      expect(result.document).toEqual(protectedDoc);
+      expect(result.document.isProtected).toBe(true);
+      expect(result.cacheControl).toBe('private, no-cache, no-store');
+    });
+  });
+
+  describe('`verifyPasscode`', () => {
+    it('正常時にパスコード照合APIへ `POST` し、トークンレスポンスを取得する。', async () => {
+      const mockResponse = {
+        success: true,
+        token: 'sample.jwt.token',
+        expiresAt: '2026-11-01T00:00:00.000Z',
+      };
+
+      globalThis.fetch = vi.fn().mockResolvedValue({
+        ok: true,
+        status: 200,
+        headers: new Headers(),
+        json: async () => mockResponse,
+      } as unknown as Response);
+
+      const result = await verifyPasscode(
+        'ProtDoc12345',
+        'secret-pass',
+        'http://localhost:8787',
+      );
+
+      expect(globalThis.fetch).toHaveBeenCalledWith(
+        'http://localhost:8787/api/documents/ProtDoc12345/verify-passcode',
+        expect.objectContaining({
+          method: 'POST',
+          credentials: 'include',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ passcode: 'secret-pass' }),
+        }),
+      );
+      expect(result).toEqual(mockResponse);
+    });
+
+    it('パスコード不一致時に 401 の `ApiError` を throw する。', async () => {
+      globalThis.fetch = vi.fn().mockResolvedValue({
+        ok: false,
+        status: 401,
+        headers: new Headers(),
+        json: async () => ({
+          error: { message: 'パスコードが一致しません。' },
+        }),
+      } as unknown as Response);
+
+      await expect(
+        verifyPasscode('ProtDoc12345', 'wrong-pass', 'http://localhost:8787'),
+      ).rejects.toThrow('パスコードが一致しません。');
     });
   });
 

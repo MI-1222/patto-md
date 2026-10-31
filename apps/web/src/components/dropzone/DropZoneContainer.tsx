@@ -87,6 +87,8 @@ export function DropZoneContainer() {
             onReset={handleReset}
             onPublishClick={async ({
               expiration,
+              visibility,
+              passcode,
               allowIncompletePublish,
               turnstileToken,
             }) => {
@@ -96,6 +98,8 @@ export function DropZoneContainer() {
                 parseResult,
                 markdownContent,
                 expiration,
+                visibility,
+                passcode,
                 allowIncompletePublish,
                 turnstileToken,
               });

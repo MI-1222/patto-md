@@ -7,7 +7,9 @@
 import {
   EDIT_TOKEN_PATTERN,
   MODIFY_TOKEN_PATTERN,
+  PASSCODE_AUTH_COOKIE_PREFIX,
   SLUG_PATTERN,
+  VIEW_TOKEN_EXPIRATION_SECONDS,
 } from '@patto-md/shared';
 import { addMyDocumentId } from './myDocuments.ts';
 
@@ -23,6 +25,8 @@ export interface StoredDocumentTokens {
   editToken?: string;
   /** 本文更新専用トークン(本文更新のみ可能)。 */
   modifyToken?: string;
+  /** パスコード照合済み閲覧認可トークン(JWT)。 */
+  viewToken?: string;
   /** 保存・更新日時文字列(ISO 8601形式)。 */
   savedAt: string;
 }
@@ -71,8 +75,12 @@ function readTokenMap(): DocumentTokenMap {
         MODIFY_TOKEN_PATTERN.test(record.modifyToken)
           ? record.modifyToken
           : undefined;
+      const viewToken =
+        typeof record.viewToken === 'string' && record.viewToken.length > 0
+          ? record.viewToken
+          : undefined;
 
-      if (!editToken && !modifyToken) {
+      if (!editToken && !modifyToken && !viewToken) {
         continue;
       }
 
@@ -84,6 +92,7 @@ function readTokenMap(): DocumentTokenMap {
       validMap[key] = {
         editToken,
         modifyToken,
+        viewToken,
         savedAt,
       };
     }
@@ -177,6 +186,7 @@ export function saveDocumentTokens(
   map[id] = {
     editToken: validEditToken ?? existing?.editToken,
     modifyToken: validModifyToken ?? existing?.modifyToken,
+    viewToken: existing?.viewToken,
     savedAt: new Date().toISOString(),
   };
 
@@ -327,4 +337,108 @@ export function consumeTokenFromUrlHash(
   }
 
   return { editToken, modifyToken };
+}
+
+/**
+ * パスコード照合によって取得した閲覧用署名トークン(`JWT`)を保存する。
+ *
+ * Cloudflare Pages と Workers の別オリジン構成でも SSR 側のリクエストに `Cookie` が中継されるよう、
+ * フロントエンド(Pages)側の `document.cookie` に設定し、同時に `localStorage` にも退避する。
+ *
+ * @param documentId - 対象のドキュメントID(`slug`)。
+ * @param token - パスコード照合APIから発行された閲覧用 `JWT`。
+ */
+export function savePasscodeViewToken(documentId: string, token: string): void {
+  if (
+    typeof window === 'undefined' ||
+    !documentId ||
+    !SLUG_PATTERN.test(documentId) ||
+    !token
+  ) {
+    return;
+  }
+
+  const cookieName = `${PASSCODE_AUTH_COOKIE_PREFIX}${documentId}`;
+  const isSecure = window.location.protocol === 'https:';
+  const cookieParts = [
+    `${cookieName}=${encodeURIComponent(token)}`,
+    'Path=/',
+    `Max-Age=${VIEW_TOKEN_EXPIRATION_SECONDS}`,
+    'SameSite=Lax',
+  ];
+  if (isSecure) {
+    cookieParts.push('Secure');
+  }
+  document.cookie = cookieParts.join('; ');
+
+  const map = readTokenMap();
+  const existing = map[documentId];
+
+  map[documentId] = {
+    editToken: existing?.editToken,
+    modifyToken: existing?.modifyToken,
+    viewToken: token,
+    savedAt: new Date().toISOString(),
+  };
+
+  writeTokenMap(map);
+}
+
+/**
+ * 指定されたドキュメントの閲覧用署名トークン(`JWT`)を取得する。
+ *
+ * `document.cookie` からの取得を優先し、未検出時は `localStorage` の退避値を取得する。
+ *
+ * @param documentId - ドキュメントID(`slug`)。
+ * @returns 保持されている閲覧トークン文字列。未保持時は `null`。
+ */
+export function getPasscodeViewToken(documentId: string): string | null {
+  if (
+    typeof window === 'undefined' ||
+    !documentId ||
+    !SLUG_PATTERN.test(documentId)
+  ) {
+    return null;
+  }
+
+  const cookiePrefix = `${PASSCODE_AUTH_COOKIE_PREFIX}${documentId}=`;
+  const cookies = document.cookie.split(';');
+  for (const cookie of cookies) {
+    const trimmed = cookie.trim();
+    if (trimmed.startsWith(cookiePrefix)) {
+      const rawValue = trimmed.slice(cookiePrefix.length);
+      try {
+        return decodeURIComponent(rawValue);
+      } catch {
+        return rawValue;
+      }
+    }
+  }
+
+  const map = readTokenMap();
+  return map[documentId]?.viewToken ?? null;
+}
+
+/**
+ * 指定されたドキュメントの閲覧用署名トークンを `Cookie` および `localStorage` から削除する。
+ *
+ * @param documentId - 対象のドキュメントID(`slug`)。
+ */
+export function removePasscodeViewToken(documentId: string): void {
+  if (
+    typeof window === 'undefined' ||
+    !documentId ||
+    !SLUG_PATTERN.test(documentId)
+  ) {
+    return;
+  }
+
+  const cookieName = `${PASSCODE_AUTH_COOKIE_PREFIX}${documentId}`;
+  document.cookie = `${cookieName}=; Path=/; Max-Age=0; SameSite=Lax`;
+
+  const map = readTokenMap();
+  if (map[documentId]) {
+    delete map[documentId].viewToken;
+    writeTokenMap(map);
+  }
 }

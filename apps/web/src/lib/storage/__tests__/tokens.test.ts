@@ -9,6 +9,9 @@ import {
   hasModifyPermission,
   clearStaleTokens,
   consumeTokenFromUrlHash,
+  savePasscodeViewToken,
+  getPasscodeViewToken,
+  removePasscodeViewToken,
 } from '../tokens.ts';
 import { getMyDocumentIds } from '../myDocuments.ts';
 
@@ -35,12 +38,52 @@ class MemoryStorage {
 
 describe('クライアント側トークン管理 (`tokens`)', () => {
   let mockStorage: MemoryStorage;
+  let mockCookie = '';
   const validEditToken = `pt_edt_${'a'.repeat(43)}`;
   const validModifyToken = `pt_mod_${'b'.repeat(43)}`;
   const validSlug = 'abc123def456';
 
   beforeEach(() => {
     mockStorage = new MemoryStorage();
+    mockCookie = '';
+    (
+      globalThis as unknown as {
+        document?: { cookie: string };
+        window?: {
+          localStorage: MemoryStorage;
+          location: {
+            hash: string;
+            pathname: string;
+            search: string;
+            protocol: string;
+          };
+          history: {
+            replaceState: (
+              data: unknown,
+              unused: string,
+              url?: string | URL | null,
+            ) => void;
+          };
+        };
+      }
+    ).document = {
+      get cookie() {
+        return mockCookie;
+      },
+      set cookie(val: string) {
+        // 簡易 Cookie ストア実装
+        const [cookiePair] = val.split(';');
+        const [k, v] = cookiePair.split('=');
+        if (val.includes('Max-Age=0')) {
+          mockCookie = mockCookie
+            .split(';')
+            .filter((c) => !c.trim().startsWith(`${k}=`))
+            .join(';');
+        } else {
+          mockCookie = `${mockCookie ? `${mockCookie}; ` : ''}${k}=${v}`;
+        }
+      },
+    };
     (
       globalThis as unknown as {
         window?: {
@@ -49,6 +92,7 @@ describe('クライアント側トークン管理 (`tokens`)', () => {
             hash: string;
             pathname: string;
             search: string;
+            protocol: string;
           };
           history: {
             replaceState: (
@@ -65,6 +109,7 @@ describe('クライアント側トークン管理 (`tokens`)', () => {
         hash: '',
         pathname: `/p/${validSlug}`,
         search: '',
+        protocol: 'https:',
       },
       history: {
         replaceState: vi.fn(),
@@ -74,6 +119,7 @@ describe('クライアント側トークン管理 (`tokens`)', () => {
 
   afterEach(() => {
     delete (globalThis as unknown as { window?: unknown }).window;
+    delete (globalThis as unknown as { document?: unknown }).document;
     vi.restoreAllMocks();
   });
 
@@ -208,6 +254,46 @@ describe('クライアント側トークン管理 (`tokens`)', () => {
       window.location.hash = '';
       const result = consumeTokenFromUrlHash(validSlug);
       expect(result).toBeNull();
+    });
+  });
+
+  describe('パスコード閲覧トークン (`savePasscodeViewToken` / `getPasscodeViewToken` / `removePasscodeViewToken`)', () => {
+    const dummyJwt = 'header.payload.signature';
+
+    it('閲覧トークンを保存すると `Cookie` と `localStorage` の双方に反映されること。', () => {
+      savePasscodeViewToken(validSlug, dummyJwt);
+
+      // Cookie からの取得確認。
+      expect(document.cookie).toContain(`patto_doc_auth_${validSlug}=`);
+      expect(getPasscodeViewToken(validSlug)).toBe(dummyJwt);
+
+      // localStorage 側の viewToken 保持確認。
+      const stored = getDocumentTokens(validSlug);
+      expect(stored?.viewToken).toBe(dummyJwt);
+    });
+
+    it('`Cookie` が存在しない場合でも `localStorage` からフォールバック取得できること。', () => {
+      // localStorage への直接設定。
+      mockStorage.setItem(
+        DOCUMENT_TOKENS_STORAGE_KEY,
+        JSON.stringify({
+          [validSlug]: {
+            viewToken: dummyJwt,
+            savedAt: new Date().toISOString(),
+          },
+        }),
+      );
+
+      mockCookie = '';
+      expect(getPasscodeViewToken(validSlug)).toBe(dummyJwt);
+    });
+
+    it('`removePasscodeViewToken` で `Cookie` と `localStorage` からクリアされること。', () => {
+      savePasscodeViewToken(validSlug, dummyJwt);
+      expect(getPasscodeViewToken(validSlug)).toBe(dummyJwt);
+
+      removePasscodeViewToken(validSlug);
+      expect(getPasscodeViewToken(validSlug)).toBeNull();
     });
   });
 });

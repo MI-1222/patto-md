@@ -2,6 +2,7 @@ import {
   documentCommitRequestSchema,
   documentRenewRequestSchema,
   documentUpdateRequestSchema,
+  documentVerifyPasscodeRequestSchema,
   generateCapabilityToken,
   hashToken,
   RATE_LIMIT_DOCUMENT_COMMIT_LIMIT,
@@ -12,6 +13,9 @@ import {
   RATE_LIMIT_DOCUMENT_RENEW_WINDOW_SECONDS,
   RATE_LIMIT_DOCUMENT_UPDATE_LIMIT,
   RATE_LIMIT_DOCUMENT_UPDATE_WINDOW_SECONDS,
+  RATE_LIMIT_VERIFY_PASSCODE_LIMIT,
+  RATE_LIMIT_VERIFY_PASSCODE_WINDOW_SECONDS,
+  verifyTokenHash,
   type AttachmentRecord,
   type DocumentCommitResponse,
   type DocumentDeleteResponse,
@@ -21,14 +25,24 @@ import {
   type DocumentRenewResponse,
   type DocumentResponse,
   type DocumentUpdateResponse,
+  type DocumentVerifyPasscodeResponse,
   SLUG_PATTERN,
   z,
 } from '@patto-md/shared';
 import { Hono } from 'hono';
+import { extractBearerToken } from '../lib/auth.ts';
 import { calculateDocumentCacheControl } from '../lib/cache.ts';
 import { calculateExpiresAt } from '../lib/date.ts';
+import { hashPasscode, verifyPasscode } from '../lib/passcode.ts';
 import { checkR2ObjectExists, getR2Text, isValidR2Key } from '../lib/r2.ts';
 import { generateSlug } from '../lib/slug.ts';
+import {
+  buildPasscodeSetCookieHeader,
+  createViewToken,
+  extractViewTokenFromCookie,
+  resolveJwtSecret,
+  verifyViewToken,
+} from '../lib/view-token.ts';
 import { createDocumentAuthMiddleware } from '../middlewares/auth.ts';
 import { createRateLimitMiddleware } from '../middlewares/rate-limit.ts';
 import type { AppEnv } from '../types';
@@ -79,8 +93,15 @@ documentsRouter.post(
       );
     }
 
-    const { title, description, contentR2Key, attachments, expiration } =
-      parseResult.data;
+    const {
+      title,
+      description,
+      contentR2Key,
+      attachments,
+      expiration,
+      visibility = 'public',
+      passcode,
+    } = parseResult.data;
 
     // R2オブジェクトキーの形式およびパストラバーサル検証。
     if (!isValidR2Key(contentR2Key)) {
@@ -184,6 +205,11 @@ documentsRouter.post(
       hashToken(modifyToken),
     ]);
 
+    let passcodeHash: string | null = null;
+    if (visibility === 'protected' && passcode) {
+      passcodeHash = await hashPasscode(passcode);
+    }
+
     // D1へのアトミックコミット(主キー衝突時は最大3回リトライ)。
     const maxRetries = 3;
     let committedSlug: string | null = null;
@@ -203,9 +229,11 @@ documentsRouter.post(
         expires_at,
         edit_token_hash,
         modify_token_hash,
+        visibility,
+        passcode_hash,
         created_at,
         updated_at
-      ) VALUES (?, ?, ?, ?, 'published', ?, ?, ?, ?, ?)`,
+      ) VALUES (?, ?, ?, ?, 'published', ?, ?, ?, ?, ?, ?, ?)`,
       ).bind(
         candidateSlug,
         title,
@@ -214,6 +242,8 @@ documentsRouter.post(
         expiresAt,
         editTokenHash,
         modifyTokenHash,
+        visibility,
+        passcodeHash,
         createdAt,
         updatedAt,
       );
@@ -366,6 +396,8 @@ documentsRouter.get('/', async (c) => {
       const placeholders = targetIds.map(() => '?').join(', ');
       whereClause += ` AND d.id IN (${placeholders})`;
       queryParams.push(...targetIds);
+    } else {
+      whereClause += " AND d.visibility = 'public'";
     }
 
     const countQuery = `SELECT COUNT(*) AS total FROM documents d WHERE ${whereClause}`;
@@ -435,9 +467,10 @@ documentsRouter.get('/', async (c) => {
 /**
  * ドキュメント詳細取得およびコンテンツ配信エンドポイント。
  *
- * 指定されたSlugに基づき、D1からメタデータを取得してオンデマンドで有効期限を判定する。
- * 有効なドキュメントであれば、R2からMarkdown本文実体を取得し、残存有効期限に応じた
- * Cache-Controlヘッダーを付与して返却する。
+ * 指定された `Slug` に基づき、D1 からメタデータを取得してオンデマンドで有効期限を判定する。
+ * パスコード保護ドキュメントの場合は特権トークンまたは閲覧認証トークンを検証し、未認可時は
+ * 本文実体の取得を遮断して 401 を返却する。認可済みまたは全体公開ドキュメントであれば、
+ * R2 から Markdown 本文実体を取得し、残存有効期限に応じた `Cache-Control` ヘッダーを付与して返却する。
  */
 documentsRouter.get('/:id', async (c) => {
   const id = c.req.param('id');
@@ -468,6 +501,10 @@ documentsRouter.get('/:id', async (c) => {
         content_r2_key,
         status,
         expires_at,
+        edit_token_hash,
+        modify_token_hash,
+        visibility,
+        passcode_hash,
         created_at,
         updated_at
       FROM documents
@@ -501,6 +538,59 @@ documentsRouter.get('/:id', async (c) => {
       },
       404,
     );
+  }
+
+  if (doc.visibility === 'protected') {
+    let isAuthorized = false;
+
+    const bearerToken = extractBearerToken(c.req.header('Authorization'));
+    if (bearerToken) {
+      const [isEditMatched, isModifyMatched] = await Promise.all([
+        verifyTokenHash(bearerToken, doc.edit_token_hash),
+        verifyTokenHash(bearerToken, doc.modify_token_hash),
+      ]);
+      if (isEditMatched || isModifyMatched) {
+        isAuthorized = true;
+      }
+    }
+
+    if (!isAuthorized) {
+      const secret = resolveJwtSecret(c.env);
+      const cookieHeader = c.req.header('Cookie');
+      const cookieToken = extractViewTokenFromCookie(cookieHeader, doc.id);
+      if (cookieToken && (await verifyViewToken(cookieToken, doc.id, secret))) {
+        isAuthorized = true;
+      } else if (
+        bearerToken &&
+        (await verifyViewToken(bearerToken, doc.id, secret))
+      ) {
+        isAuthorized = true;
+      }
+    }
+
+    if (!isAuthorized) {
+      c.header('Cache-Control', 'private, no-cache, no-store');
+      return c.json(
+        {
+          error: {
+            message: 'このドキュメントはパスコードで保護されています。',
+          },
+          document: {
+            id: doc.id,
+            title: doc.title,
+            content: '',
+            visibility: doc.visibility,
+            isProtected: true,
+            status: doc.status,
+            expiresAt: doc.expires_at,
+            createdAt: doc.created_at,
+            updatedAt: doc.updated_at,
+            attachments: [],
+          },
+        },
+        401,
+      );
+    }
   }
 
   // 紐づく添付ファイル一覧の取得。
@@ -571,14 +661,21 @@ documentsRouter.get('/:id', async (c) => {
   }
 
   // 残存有効期間に基づくCache-Controlヘッダーの付与。
-  const cacheControl = calculateDocumentCacheControl(doc.expires_at, now);
-  c.header('Cache-Control', cacheControl);
+  // パスコード保護ドキュメントの場合はエッジキャッシュ汚染防止のため常に private, no-store を強制する。
+  if (doc.visibility === 'protected') {
+    c.header('Cache-Control', 'private, no-cache, no-store');
+  } else {
+    const cacheControl = calculateDocumentCacheControl(doc.expires_at, now);
+    c.header('Cache-Control', cacheControl);
+  }
 
   // レスポンスの構築(スネークケースからキャメルケースへの変換)。
   const responsePayload: DocumentResponse = {
     id: doc.id,
     title: doc.title,
     content,
+    visibility: doc.visibility,
+    isProtected: false,
     status: doc.status,
     expiresAt: doc.expires_at,
     createdAt: doc.created_at,
@@ -599,8 +696,8 @@ documentsRouter.get('/:id', async (c) => {
  * ドキュメント本文およびメタデータの更新エンドポイント(`PUT /api/documents/:id`)。
  *
  * `modify` または `edit` のケイパビリティトークン保持者のみ実行可能。
- * 本文用R2キーおよび添付アセットの実体存在を確認した上で、
- * D1の `documents` レコード更新および`attachments` レコード群の入れ替えをアトミックに実行する。
+ * 本文用 R2 キーおよび添付アセットの実体存在を確認した上で、公開範囲(`visibility`)や
+ * パスコード(`passcode`)の設定更新、D1 の `documents` レコード更新、および `attachments` レコード群の入れ替えをアトミックに実行する。
  * 更新完了後は `Cache-Control: no-store` を返却する。
  */
 documentsRouter.put(
@@ -642,7 +739,14 @@ documentsRouter.put(
       );
     }
 
-    const { title, description, contentR2Key, attachments } = parsed.data;
+    const {
+      title,
+      description,
+      contentR2Key,
+      attachments,
+      visibility,
+      passcode,
+    } = parsed.data;
 
     if (!isValidR2Key(contentR2Key)) {
       return c.json(
@@ -719,6 +823,33 @@ documentsRouter.put(
       }
     }
 
+    const finalVisibility = visibility ?? authDoc.visibility;
+    let finalPasscodeHash = authDoc.passcode_hash;
+
+    if (visibility !== undefined) {
+      if (finalVisibility === 'protected') {
+        if (passcode && passcode.trim().length > 0) {
+          finalPasscodeHash = await hashPasscode(passcode.trim());
+        } else if (!finalPasscodeHash) {
+          return c.json(
+            {
+              error: {
+                message:
+                  'パスコード保護設定時は4〜32文字のパスコードが必須です。',
+              },
+            },
+            400,
+          );
+        }
+      } else {
+        finalPasscodeHash = null;
+      }
+    } else if (passcode && passcode.trim().length > 0) {
+      if (finalVisibility === 'protected') {
+        finalPasscodeHash = await hashPasscode(passcode.trim());
+      }
+    }
+
     const updatedAt = new Date().toISOString();
 
     const documentStatement = c.env.DB.prepare(
@@ -726,9 +857,19 @@ documentsRouter.put(
       SET title = ?,
           description = ?,
           content_r2_key = ?,
+          visibility = ?,
+          passcode_hash = ?,
           updated_at = ?
       WHERE id = ?`,
-    ).bind(title, description ?? null, contentR2Key, updatedAt, id);
+    ).bind(
+      title,
+      description ?? null,
+      contentR2Key,
+      finalVisibility,
+      finalPasscodeHash,
+      updatedAt,
+      id,
+    );
 
     const deleteAttachmentsStatement = c.env.DB.prepare(
       `DELETE FROM attachments WHERE document_id = ?`,
@@ -780,6 +921,7 @@ documentsRouter.put(
       id,
       url: `/p/${id}`,
       title,
+      visibility: finalVisibility,
       description: description ?? null,
       expiresAt: authDoc.expires_at,
       createdAt: authDoc.created_at,
@@ -920,6 +1062,173 @@ documentsRouter.post(
       url: `/p/${id}`,
       expiresAt: newExpiresAt,
       updatedAt,
+    };
+
+    return c.json(responsePayload, 200);
+  },
+);
+
+/**
+ * パスコード照合エンドポイント(`POST /api/documents/:id/verify-passcode`)。
+ *
+ * 入力されたパスコードを保存済み `PBKDF2` ハッシュと定数時間比較で照合し、
+ * 成功時に短期署名付き閲覧 `Cookie`(`JWT`) およびトークンを返却する。
+ * ブルートフォース攻撃防止のため、IP とドキュメントID単位で厳格なレートリミットを適用する。
+ */
+documentsRouter.post(
+  '/:id/verify-passcode',
+  createRateLimitMiddleware({
+    action: 'verify-passcode',
+    limit: RATE_LIMIT_VERIFY_PASSCODE_LIMIT,
+    windowSeconds: RATE_LIMIT_VERIFY_PASSCODE_WINDOW_SECONDS,
+    keyGenerator: (c) => {
+      const ip =
+        c.req.header('cf-connecting-ip') ||
+        c.req.header('x-forwarded-for') ||
+        'anonymous';
+      const id = c.req.param('id') || 'unknown';
+      return `verify-passcode:${ip}:${id}`;
+    },
+  }),
+  async (c) => {
+    const id = c.req.param('id');
+    if (!id || !SLUG_PATTERN.test(id)) {
+      return c.json(
+        {
+          error: {
+            message: '無効なドキュメント識別子です。',
+          },
+        },
+        400,
+      );
+    }
+
+    let rawBody: unknown;
+    try {
+      rawBody = await c.req.json();
+    } catch {
+      return c.json(
+        {
+          error: {
+            message: '不正なJSON形式のリクエスト。',
+          },
+        },
+        400,
+      );
+    }
+
+    const parseResult = documentVerifyPasscodeRequestSchema.safeParse(rawBody);
+    if (!parseResult.success) {
+      return c.json(
+        {
+          error: {
+            message: 'パスコードが入力されていません。',
+            details: z.flattenError(parseResult.error),
+          },
+        },
+        400,
+      );
+    }
+
+    const { passcode } = parseResult.data;
+    const nowIso = new Date().toISOString();
+
+    let doc: Pick<
+      DocumentRecord,
+      'id' | 'status' | 'expires_at' | 'visibility' | 'passcode_hash'
+    > | null = null;
+    try {
+      doc = await c.env.DB.prepare(
+        `SELECT id, status, expires_at, visibility, passcode_hash
+         FROM documents
+         WHERE id = ?
+         LIMIT 1`,
+      )
+        .bind(id)
+        .first<
+          Pick<
+            DocumentRecord,
+            'id' | 'status' | 'expires_at' | 'visibility' | 'passcode_hash'
+          >
+        >();
+    } catch (error) {
+      console.error('D1パスコード照合クエリエラー:', error);
+      return c.json(
+        {
+          error: {
+            message: 'データベースの参照に失敗しました。',
+          },
+        },
+        500,
+      );
+    }
+
+    if (!doc || doc.status === 'deleted') {
+      return c.json(
+        {
+          error: {
+            message: 'ドキュメントが見つかりません。',
+          },
+        },
+        404,
+      );
+    }
+
+    if (doc.status === 'suspended') {
+      return c.json(
+        {
+          error: {
+            message: '規約違反の通報により凍結されています。',
+          },
+        },
+        403,
+      );
+    }
+
+    if (doc.expires_at && doc.expires_at <= nowIso) {
+      return c.json(
+        {
+          error: {
+            message: 'ドキュメントが見つかりません。',
+          },
+        },
+        404,
+      );
+    }
+
+    if (doc.visibility !== 'protected' || !doc.passcode_hash) {
+      return c.json(
+        {
+          error: {
+            message: 'このドキュメントはパスコードで保護されていません。',
+          },
+        },
+        400,
+      );
+    }
+
+    const isMatched = await verifyPasscode(passcode, doc.passcode_hash);
+    if (!isMatched) {
+      return c.json(
+        {
+          error: {
+            message: 'パスコードが一致しません。',
+          },
+        },
+        401,
+      );
+    }
+
+    const secret = resolveJwtSecret(c.env);
+    const { token, expiresAt } = await createViewToken(doc.id, secret);
+
+    c.header('Set-Cookie', buildPasscodeSetCookieHeader(doc.id, token));
+    c.header('Cache-Control', 'no-store');
+
+    const responsePayload: DocumentVerifyPasscodeResponse = {
+      success: true,
+      token,
+      expiresAt,
     };
 
     return c.json(responsePayload, 200);

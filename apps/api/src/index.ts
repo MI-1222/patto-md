@@ -23,6 +23,7 @@ app.use(
   cors({
     origin: (origin, c) => resolveAllowedOrigin(origin, c.env.FRONTEND_ORIGIN),
     allowMethods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
+    credentials: true,
     allowHeaders: [
       'Content-Type',
       'Authorization',

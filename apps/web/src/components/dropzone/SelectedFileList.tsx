@@ -1,6 +1,6 @@
 import { useState, useRef } from 'react';
 import type { Root } from 'mdast';
-import type { ExpirationPreset } from '@patto-md/shared';
+import type { DocumentVisibility, ExpirationPreset } from '@patto-md/shared';
 import {
   FileDocumentSvg,
   ImageSvg,
@@ -9,6 +9,7 @@ import {
   WarningSvg,
   SpinnerSvg,
 } from '../svg/FileIcons';
+import { EyeIcon, EyeSlashIcon, LockIcon } from '../svg/ActionIcons';
 import { PublishSvg } from '../svg/PublishIcon';
 import { MarkdownPreview } from './MarkdownPreview';
 import { TurnstileWidget, type TurnstileWidgetHandle } from '../turnstile';
@@ -33,14 +34,19 @@ function formatFileSize(bytes: number): string {
   return `${mb.toFixed(1)} MB`;
 }
 
-/**
- * 有効期限プリセットの選択肢定義。
- */
+/** 有効期限プリセットの選択肢定義。 */
 const EXPIRATION_OPTIONS: { value: ExpirationPreset; label: string }[] = [
   { value: '1day', label: '24時間' },
   { value: '7days', label: '7日間 (推奨)' },
   { value: '30days', label: '30日間' },
   { value: 'never', label: '無期限' },
+];
+
+/** 公開範囲の選択肢定義。 */
+const VISIBILITY_OPTIONS: { value: DocumentVisibility; label: string }[] = [
+  { value: 'public', label: '全体公開' },
+  { value: 'unlisted', label: '限定公開 (URL知人のみ)' },
+  { value: 'protected', label: 'パスコード保護' },
 ];
 
 /** 選択済みファイル一覧プレビューコンポーネントのプロパティ定義。 */
@@ -74,6 +80,8 @@ interface SelectedFileListProps {
   /** 公開実行時のコールバック関数。 */
   onPublishClick?: (options: {
     expiration: ExpirationPreset;
+    visibility: DocumentVisibility;
+    passcode?: string;
     allowIncompletePublish: boolean;
     turnstileToken?: string;
   }) => void;
@@ -112,6 +120,9 @@ export function SelectedFileList({
   const [activeTab, setActiveTab] = useState<'files' | 'preview'>('files');
   const [allowIncompletePublish, setAllowIncompletePublish] = useState(false);
   const [expiration, setExpiration] = useState<ExpirationPreset>('7days');
+  const [visibility, setVisibility] = useState<DocumentVisibility>('public');
+  const [passcode, setPasscode] = useState('');
+  const [showPasscode, setShowPasscode] = useState(false);
   const [turnstileToken, setTurnstileToken] = useState<string | null>(null);
   const turnstileRef = useRef<TurnstileWidgetHandle>(null);
 
@@ -121,6 +132,11 @@ export function SelectedFileList({
     reconciliation?.missing.map((m) => m.cleanPath) || [],
   );
 
+  /** パスコード保護設定時の入力値バリデーション。 */
+  const isPasscodeValid =
+    visibility !== 'protected' ||
+    (passcode.trim().length >= 4 && passcode.trim().length <= 32);
+
   /** ファイル構成要件(Markdown存在、制約違反なし、画像突合完了または未解決許容)の充足判定。 */
   const isFilesReady =
     markdownFile !== null &&
@@ -129,7 +145,7 @@ export function SelectedFileList({
     (reconciliation.isComplete || allowIncompletePublish);
 
   /** ボット検証トークンを含めた最終的な公開可否判定。 */
-  const canPublish = isFilesReady && Boolean(turnstileToken);
+  const canPublish = isFilesReady && Boolean(turnstileToken) && isPasscodeValid;
 
   /**
    * 公開処理を実行する。
@@ -146,6 +162,8 @@ export function SelectedFileList({
 
     onPublishClick?.({
       expiration,
+      visibility,
+      passcode: visibility === 'protected' ? passcode.trim() : undefined,
       allowIncompletePublish,
       turnstileToken: currentToken || undefined,
     });
@@ -464,9 +482,11 @@ export function SelectedFileList({
                   ? `未解決の画像が ${missingCount} 件残っています。不足ファイルを追加するか、そのまま公開にチェックを入れてください。`
                   : hasInvalidFiles
                     ? 'ファイルエラーを解消してください。'
-                    : isFilesReady && !turnstileToken
-                      ? 'ボット検証(認証)を行っています...'
-                      : 'ファイルを解決中...'}
+                    : !isPasscodeValid
+                      ? 'パスコードは4〜32文字で入力してください。'
+                      : isFilesReady && !turnstileToken
+                        ? 'ボット検証(認証)を行っています...'
+                        : 'ファイルを解決中...'}
             </p>
           ) : (
             <p className="text-xs text-emerald-400">
@@ -477,7 +497,60 @@ export function SelectedFileList({
           )}
         </div>
 
-        <div className="flex shrink-0 items-center gap-3">
+        <div className="flex shrink-0 flex-wrap items-center gap-3">
+          <div className="flex items-center gap-1.5">
+            <label
+              htmlFor="visibility-select"
+              className="text-xs text-neutral-400"
+            >
+              公開範囲:
+            </label>
+            <select
+              id="visibility-select"
+              disabled={isPublishing}
+              value={visibility}
+              onChange={(e) =>
+                setVisibility(e.target.value as DocumentVisibility)
+              }
+              className="rounded-lg border border-neutral-700 bg-neutral-900 px-2.5 py-1.5 text-xs text-neutral-200 focus:border-blue-500 focus:ring-1 focus:ring-blue-500 focus:outline-none disabled:cursor-not-allowed disabled:opacity-50"
+            >
+              {VISIBILITY_OPTIONS.map((opt) => (
+                <option key={opt.value} value={opt.value}>
+                  {opt.label}
+                </option>
+              ))}
+            </select>
+          </div>
+
+          {visibility === 'protected' && (
+            <div className="relative flex items-center">
+              <span className="pointer-events-none absolute left-2.5 text-neutral-400">
+                <LockIcon className="size-3.5" />
+              </span>
+              <input
+                type={showPasscode ? 'text' : 'password'}
+                value={passcode}
+                onChange={(e) => setPasscode(e.target.value)}
+                placeholder="パスコード (4〜32文字)"
+                disabled={isPublishing}
+                maxLength={32}
+                className="w-44 rounded-lg border border-neutral-700 bg-neutral-900 px-8 py-1.5 text-xs text-neutral-200 placeholder:text-neutral-500 focus:border-blue-500 focus:ring-1 focus:ring-blue-500 focus:outline-none disabled:cursor-not-allowed disabled:opacity-50"
+              />
+              <button
+                type="button"
+                onClick={() => setShowPasscode(!showPasscode)}
+                className="absolute right-2 text-neutral-400 hover:text-neutral-200"
+                tabIndex={-1}
+              >
+                {showPasscode ? (
+                  <EyeSlashIcon className="size-3.5" />
+                ) : (
+                  <EyeIcon className="size-3.5" />
+                )}
+              </button>
+            </div>
+          )}
+
           <div className="flex items-center gap-1.5">
             <label
               htmlFor="expiration-select"

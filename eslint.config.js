@@ -12,6 +12,7 @@ export default [
       '**/.local/**',
       '**/.wrangler/**',
       '**/node_modules/**',
+      '**/worker-configuration.d.ts',
     ],
   },
 
