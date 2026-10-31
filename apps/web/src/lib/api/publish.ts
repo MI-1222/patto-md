@@ -184,6 +184,7 @@ export async function executePublishPipeline(
     fileSignItems,
     baseUrl,
     turnstileToken,
+    expiration,
   );
   const signedFiles = signResponse.files;
 

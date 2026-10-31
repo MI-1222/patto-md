@@ -2,6 +2,7 @@ import {
   MAX_TOTAL_FILE_SIZE,
   type DocumentAttachmentCommit,
   type DocumentUpdateResponse,
+  type ExpirationPreset,
   type UploadSignFileItem,
   type UploadSignFileResponseItem,
 } from '@patto-md/shared';
@@ -58,6 +59,8 @@ export interface ExecuteUpdatePipelineParams {
   existingAttachments: ExistingAttachmentItem[];
   /** 新規に追加された画像ファイル群。 */
   newFiles?: File[];
+  /** 有効期限プリセット(任意)。未指定時は既存アセットから推測または既定値が適用される。 */
+  expiration?: ExpirationPreset;
   /** 未解決画像のリンク切れ更新を容認するかどうかの真偽値。 */
   allowIncompletePublish?: boolean;
   /** Cloudflare Turnstile ボット検証トークン。 */
@@ -182,10 +185,26 @@ export async function executeUpdatePipeline(
     },
   ];
 
+  /** 明示指定または既存添付ファイルのキーから推測した有効期限プリセット。 */
+  let resolvedExpiration: ExpirationPreset | undefined = params.expiration;
+  if (!resolvedExpiration && existingAttachments.length > 0) {
+    const sampleKey = existingAttachments[0].r2Key;
+    if (sampleKey.startsWith('exp-1d/')) {
+      resolvedExpiration = '1day';
+    } else if (sampleKey.startsWith('exp-7d/')) {
+      resolvedExpiration = '7days';
+    } else if (sampleKey.startsWith('exp-30d/')) {
+      resolvedExpiration = '30days';
+    } else if (sampleKey.startsWith('permanent/')) {
+      resolvedExpiration = 'never';
+    }
+  }
+
   const signResponse = await requestUploadSign(
     fileSignItems,
     baseUrl,
     turnstileToken,
+    resolvedExpiration,
   );
   const signedFiles = signResponse.files;
 

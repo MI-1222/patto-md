@@ -44,7 +44,15 @@ import { extractBearerToken } from '../lib/auth.ts';
 import { calculateDocumentCacheControl } from '../lib/cache.ts';
 import { calculateExpiresAt } from '../lib/date.ts';
 import { hashPasscode, verifyPasscode } from '../lib/passcode.ts';
-import { checkR2ObjectExists, getR2Text, isValidR2Key } from '../lib/r2.ts';
+import {
+  checkR2ObjectExists,
+  copyAndDeleteR2Object,
+  extractExpirationPrefix,
+  getExpirationPrefix,
+  getR2Text,
+  isValidR2Key,
+  migrateR2KeyPrefix,
+} from '../lib/r2.ts';
 import { getClientIp } from '../lib/rate-limit.ts';
 import { hashClientIp } from '../lib/ip-hash.ts';
 import { generateSlug } from '../lib/slug.ts';
@@ -129,12 +137,42 @@ documentsRouter.post(
       );
     }
 
+    /** 指定された有効期限プリセットに対応する期待プレフィックス。 */
+    const expectedPrefix = getExpirationPrefix(expiration);
+    if (
+      !contentR2Key.startsWith(expectedPrefix) &&
+      !contentR2Key.startsWith('temp/uploads/')
+    ) {
+      return c.json(
+        {
+          error: {
+            message:
+              'ドキュメントの有効期限と本文ストレージキーの失効プレフィックスが一致しません。',
+          },
+        },
+        400,
+      );
+    }
+
     for (const attachment of attachments) {
       if (!isValidR2Key(attachment.r2Key)) {
         return c.json(
           {
             error: {
               message: `添付ファイル「${attachment.fileName}」のストレージキーが不正です。`,
+            },
+          },
+          400,
+        );
+      }
+      if (
+        !attachment.r2Key.startsWith(expectedPrefix) &&
+        !attachment.r2Key.startsWith('temp/uploads/')
+      ) {
+        return c.json(
+          {
+            error: {
+              message: `添付ファイル「${attachment.fileName}」のストレージキーが有効期限プレフィックスと一致しません。`,
             },
           },
           400,
@@ -827,6 +865,25 @@ documentsRouter.put(
       );
     }
 
+    /** 既存ドキュメントの本文キーから抽出した現在の失効プレフィックス。 */
+    const currentPrefix = extractExpirationPrefix(authDoc.content_r2_key);
+    if (currentPrefix) {
+      if (
+        !contentR2Key.startsWith(currentPrefix) &&
+        !contentR2Key.startsWith('temp/uploads/')
+      ) {
+        return c.json(
+          {
+            error: {
+              message:
+                '既存ドキュメントの有効期限プレフィックスと本文ストレージキーが一致しません。',
+            },
+          },
+          400,
+        );
+      }
+    }
+
     for (const attachment of attachments) {
       if (!isValidR2Key(attachment.r2Key)) {
         return c.json(
@@ -837,6 +894,21 @@ documentsRouter.put(
           },
           400,
         );
+      }
+      if (currentPrefix) {
+        if (
+          !attachment.r2Key.startsWith(currentPrefix) &&
+          !attachment.r2Key.startsWith('temp/uploads/')
+        ) {
+          return c.json(
+            {
+              error: {
+                message: `添付ファイル「${attachment.fileName}」のストレージキーが有効期限プレフィックスと一致しません。`,
+              },
+            },
+            400,
+          );
+        }
       }
     }
 
@@ -1056,6 +1128,8 @@ documentsRouter.delete(
  *
  * 特権 `edit` トークン保持者のみ実行可能。
  * 現在時刻を起点に指定プリセットから有効期限を再計算し、`status = 'published'` に復帰させる。
+ * R2 上の Markdown 本文および添付アセットを新有効期限プレフィックスへ再配置して起算日(Creation Time)を更新し、
+ * 本文中の画像参照 URL (`/api/assets/...`) を新キーへ一括置換した上で、D1 のドキュメント情報および添付キーをアトミックに更新する。
  */
 documentsRouter.post(
   '/:id/renew',
@@ -1101,22 +1175,125 @@ documentsRouter.post(
     const newExpiresAt = calculateExpiresAt(expiration, now);
     const updatedAt = now.toISOString();
 
+    /** 延長後の有効期限プリセットに対応する新プレフィックス。 */
+    const newPrefix = getExpirationPrefix(expiration);
+    const oldContentKey = authDoc.content_r2_key;
+    /** 新プレフィックスを付与した本文の R2 オブジェクトキー。 */
+    const newContentKey = migrateR2KeyPrefix(oldContentKey, newPrefix);
+
+    const r2Creds = {
+      accountId: c.env.CLOUDFLARE_ACCOUNT_ID,
+      accessKeyId: c.env.R2_ACCESS_KEY_ID,
+      secretAccessKey: c.env.R2_SECRET_ACCESS_KEY,
+      bucketName: c.env.R2_BUCKET_NAME,
+    };
+
     try {
-      await c.env.DB.prepare(
-        `UPDATE documents
-        SET expires_at = ?,
-            status = 'published',
-            updated_at = ?
-        WHERE id = ?`,
-      )
-        .bind(newExpiresAt, updatedAt, id)
-        .run();
+      /** 置換対象となる Markdown 本文テキスト。 */
+      let updatedContentText: string | null = null;
+      if (c.env.BUCKET && typeof c.env.BUCKET.get === 'function') {
+        updatedContentText = await getR2Text(
+          c.env.BUCKET,
+          oldContentKey,
+          r2Creds,
+        );
+      }
+
+      const preparedAttachments = c.env.DB.prepare(
+        'SELECT id, r2_key FROM attachments WHERE document_id = ?',
+      ).bind(id);
+
+      const attachmentsResult =
+        typeof preparedAttachments.all === 'function'
+          ? await preparedAttachments.all<{ id: string; r2_key: string }>()
+          : { results: [] };
+
+      /** 添付ファイルの新キー移行情報一覧。 */
+      const attachmentMigrations: Array<{ id: string; newR2Key: string }> = [];
+      if (attachmentsResult?.results && attachmentsResult.results.length > 0) {
+        for (const att of attachmentsResult.results) {
+          const newAttKey = migrateR2KeyPrefix(att.r2_key, newPrefix);
+          if (c.env.BUCKET && typeof c.env.BUCKET.get === 'function') {
+            await copyAndDeleteR2Object(c.env.BUCKET, att.r2_key, newAttKey);
+          }
+
+          if (updatedContentText && att.r2_key !== newAttKey) {
+            updatedContentText = updatedContentText
+              .replaceAll(
+                `/api/assets/${att.r2_key}`,
+                `/api/assets/${newAttKey}`,
+              )
+              .replaceAll(
+                `/api/assets/${encodeURI(att.r2_key)}`,
+                `/api/assets/${encodeURI(newAttKey)}`,
+              );
+          }
+
+          attachmentMigrations.push({ id: att.id, newR2Key: newAttKey });
+        }
+      }
+
+      if (c.env.BUCKET && typeof c.env.BUCKET.put === 'function') {
+        if (updatedContentText !== null) {
+          await c.env.BUCKET.put(newContentKey, updatedContentText, {
+            httpMetadata: {
+              contentType: 'text/markdown; charset=utf-8',
+            },
+          });
+          if (
+            oldContentKey !== newContentKey &&
+            typeof c.env.BUCKET.delete === 'function'
+          ) {
+            await c.env.BUCKET.delete(oldContentKey);
+          }
+        } else if (typeof c.env.BUCKET.get === 'function') {
+          await copyAndDeleteR2Object(
+            c.env.BUCKET,
+            oldContentKey,
+            newContentKey,
+          );
+        }
+      }
+
+      if (attachmentMigrations.length > 0) {
+        const statements: D1PreparedStatement[] = [
+          c.env.DB.prepare(
+            `UPDATE documents
+            SET expires_at = ?,
+                status = 'published',
+                updated_at = ?,
+                content_r2_key = ?
+            WHERE id = ?`,
+          ).bind(newExpiresAt, updatedAt, newContentKey, id),
+        ];
+
+        for (const migration of attachmentMigrations) {
+          statements.push(
+            c.env.DB.prepare(
+              'UPDATE attachments SET r2_key = ? WHERE id = ?',
+            ).bind(migration.newR2Key, migration.id),
+          );
+        }
+
+        await c.env.DB.batch(statements);
+      } else {
+        await c.env.DB.prepare(
+          `UPDATE documents
+          SET expires_at = ?,
+              status = 'published',
+              updated_at = ?,
+              content_r2_key = ?
+          WHERE id = ?`,
+        )
+          .bind(newExpiresAt, updatedAt, newContentKey, id)
+          .run();
+      }
     } catch (error) {
-      console.error('D1ドキュメント有効期限更新エラー:', error);
+      console.error('ドキュメント有効期限延長・ストレージ移行エラー:', error);
       return c.json(
         {
           error: {
-            message: 'データベースの更新に失敗しました。',
+            message: 'データベースまたはストレージの更新に失敗しました。',
           },
         },
         500,

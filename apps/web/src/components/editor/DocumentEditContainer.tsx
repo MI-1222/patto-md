@@ -5,6 +5,7 @@ import {
   MODIFY_TOKEN_PATTERN,
   MAX_TITLE_LENGTH,
   MAX_TOTAL_FILE_SIZE,
+  type ExpirationPreset,
 } from '@patto-md/shared';
 import {
   getDocumentTokens,
@@ -238,6 +239,24 @@ export const DocumentEditContainer: FC<DocumentEditContainerProps> = ({
     setProgressMessage('更新処理を開始中...');
     setProgressPercent(5);
 
+    /** 作成日時と有効期限の差分から算出した有効期限プリセット。 */
+    let docExpiration: ExpirationPreset | undefined;
+    if (initialDocument.expiresAt === null) {
+      docExpiration = 'never';
+    } else {
+      const diffHours =
+        (new Date(initialDocument.expiresAt).getTime() -
+          new Date(initialDocument.createdAt).getTime()) /
+        (1000 * 60 * 60);
+      if (diffHours <= 36) {
+        docExpiration = '1day';
+      } else if (diffHours <= 14 * 24) {
+        docExpiration = '7days';
+      } else {
+        docExpiration = '30days';
+      }
+    }
+
     try {
       await executeUpdatePipeline({
         documentId: initialDocument.id,
@@ -246,6 +265,7 @@ export const DocumentEditContainer: FC<DocumentEditContainerProps> = ({
         markdownContent,
         existingAttachments,
         newFiles,
+        expiration: docExpiration,
         turnstileToken: turnstileToken || undefined,
         baseUrl: apiBaseUrl,
         onProgress: (p) => {

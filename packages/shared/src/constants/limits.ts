@@ -61,6 +61,18 @@ export const EXPIRATION_SECONDS_MAP: Record<ExpirationPreset, number | null> = {
   never: null,
 };
 
+/** 有効期限プリセットに対応するR2オブジェクトキーのプレフィックスマッピング。 */
+export const EXPIRATION_R2_PREFIX_MAP: Record<ExpirationPreset, string> = {
+  '1day': 'exp-1d/',
+  '7days': 'exp-7d/',
+  '30days': 'exp-30d/',
+  never: 'permanent/',
+};
+
+/** R2オブジェクトキーの有効期限プレフィックス型。 */
+export type ExpirationR2Prefix =
+  (typeof EXPIRATION_R2_PREFIX_MAP)[ExpirationPreset];
+
 /** R2 Presigned PUT URL の有効期限(秒単位、5分)。 */
 export const PRESIGNED_URL_EXPIRATION_SECONDS = 300;
 

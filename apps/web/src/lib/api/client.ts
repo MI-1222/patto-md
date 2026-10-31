@@ -11,6 +11,7 @@ import {
   type DocumentUpdateRequest,
   type DocumentUpdateResponse,
   type DocumentVerifyPasscodeResponse,
+  type ExpirationPreset,
   type UploadSignFileItem,
   type UploadSignResponse,
 } from '@patto-md/shared';
@@ -114,12 +115,14 @@ export class ApiError extends Error {
  * @param files - 署名を要求するファイル一覧。
  * @param baseUrl - 接続先APIベースURL。未指定時は `getApiBaseUrl()` を使用する。
  * @param turnstileToken - Cloudflare Turnstile ボット検証トークン。
+ * @param expiration - 有効期限プリセット。指定時は対応するプレフィックスが付与されたキーを発行する。
  * @returns 署名発行レスポンス。
  */
 export async function requestUploadSign(
   files: UploadSignFileItem[],
   baseUrl: string = getApiBaseUrl(),
   turnstileToken?: string,
+  expiration?: ExpirationPreset,
 ): Promise<UploadSignResponse> {
   const url = `${baseUrl}/api/upload/sign`;
 
@@ -135,7 +138,10 @@ export async function requestUploadSign(
     response = await fetch(url, {
       method: 'POST',
       headers,
-      body: JSON.stringify({ files }),
+      body: JSON.stringify({
+        files,
+        ...(expiration ? { expiration } : {}),
+      }),
     });
   } catch (error) {
     const detail = error instanceof Error ? error.message : String(error);

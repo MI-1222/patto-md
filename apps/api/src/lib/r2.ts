@@ -1,12 +1,81 @@
-import { PRESIGNED_URL_EXPIRATION_SECONDS } from '@patto-md/shared';
+import {
+  EXPIRATION_R2_PREFIX_MAP,
+  PRESIGNED_URL_EXPIRATION_SECONDS,
+  type ExpirationPreset,
+} from '@patto-md/shared';
 import { AwsClient } from 'aws4fetch';
 
 /** デフォルトのR2バケット名。 */
 export const DEFAULT_R2_BUCKET_NAME = 'patto-md-r2';
 
 /**
+ * 有効期限プリセットに対応するR2オブジェクトキーのプレフィックスを取得する。
+ *
+ * @param expiration - 有効期限プリセット。
+ * @returns R2オブジェクトキーのプレフィックス。
+ */
+export function getExpirationPrefix(expiration: ExpirationPreset): string {
+  return EXPIRATION_R2_PREFIX_MAP[expiration] ?? 'exp-7d/';
+}
+
+/**
+ * R2オブジェクトキーから有効期限プレフィックスを抽出する。
+ *
+ * @param key - R2オブジェクトキー。
+ * @returns 抽出されたプレフィックス。プレフィックスが存在しない場合は `null`。
+ */
+export function extractExpirationPrefix(key: string): string | null {
+  const match = key.match(/^(exp-(?:1d|7d|30d)\/|permanent\/)/);
+  return match ? match[1] : null;
+}
+
+/**
+ * 既存のR2オブジェクトキーのプレフィックスを新しいプレフィックスへ付け替える。
+ *
+ * @param oldKey - 付け替え元のR2オブジェクトキー。
+ * @param newPrefix - 付け替え先のプレフィックス。
+ * @returns 新しいプレフィックスが付与されたR2オブジェクトキー。
+ */
+export function migrateR2KeyPrefix(oldKey: string, newPrefix: string): string {
+  const stripped = oldKey.replace(/^(?:exp-(?:1d|7d|30d)\/|permanent\/)/, '');
+  const normalized = stripped.startsWith('temp/')
+    ? stripped.slice('temp/'.length)
+    : stripped;
+  return `${newPrefix}${normalized}`;
+}
+
+/**
+ * R2バケット内のオブジェクトを新しいキーへコピーし、旧オブジェクトを削除する。
+ * 同一キーの場合は再PUTし、起算日(Creation Time)を更新する。
+ *
+ * @param bucket - R2バケットバインディング。
+ * @param oldKey - コピー元のオブジェクトキー。
+ * @param newKey - コピー先のオブジェクトキー。
+ */
+export async function copyAndDeleteR2Object(
+  bucket: R2Bucket,
+  oldKey: string,
+  newKey: string,
+): Promise<void> {
+  const obj = await bucket.get(oldKey);
+  if (!obj) {
+    return;
+  }
+
+  await bucket.put(newKey, obj.body, {
+    httpMetadata: obj.httpMetadata,
+    customMetadata: obj.customMetadata,
+  });
+
+  if (oldKey !== newKey) {
+    await bucket.delete(oldKey);
+  }
+}
+
+/**
  * R2オブジェクトキーが許容形式に適合しているかを判定する。
- * パストラバーサルを防ぎ、`temp/uploads/` から始まる一時アップロードのパス形式かを検証する。
+ * パストラバーサルを防ぎ、有効期限プレフィックス(`exp-1d/`, `exp-7d/`, `exp-30d/`, `permanent/`)
+ * または移行前互換プレフィックス(`temp/`)で始まる正規パス形式かを検証する。
  *
  * @param key - 検証対象のR2キー文字列。
  * @returns 形式が正当な場合は `true`、それ以外は `false`。
@@ -18,7 +87,9 @@ export function isValidR2Key(key: string): boolean {
   if (key.includes('..') || key.startsWith('/') || key.includes('\\')) {
     return false;
   }
-  return key.startsWith('temp/uploads/');
+  return /^(?:(?:exp-(?:1d|7d|30d)|permanent)\/(?:temp\/)?|temp\/)uploads\/.+$/.test(
+    key,
+  );
 }
 
 /**
@@ -42,15 +113,22 @@ export function sanitizeFileName(fileName: string): string {
 }
 
 /**
- * R2上に配置する一時オブジェクトキーを生成する。
+ * R2上に配置するオブジェクトキーを生成する。
+ * 指定された有効期限プリセットに応じたライフサイクルプレフィックスを先頭に付与する。
  *
- * @param fileId 一意なファイル識別子(UUID)。
- * @param fileName 元のファイル名。
+ * @param fileId - 一意なファイル識別子(UUID)。
+ * @param fileName - 元のファイル名。
+ * @param expiration - 有効期限プリセット(未指定時は `'7days'`)。
  * @returns R2オブジェクトキー。
  */
-export function generateR2Key(fileId: string, fileName: string): string {
+export function generateR2Key(
+  fileId: string,
+  fileName: string,
+  expiration: ExpirationPreset = '7days',
+): string {
   const safeName = sanitizeFileName(fileName);
-  return `temp/uploads/${fileId}/${safeName}`;
+  const prefix = getExpirationPrefix(expiration);
+  return `${prefix}uploads/${fileId}/${safeName}`;
 }
 
 /** Presigned PUT URL生成のパラメータ定義。 */
