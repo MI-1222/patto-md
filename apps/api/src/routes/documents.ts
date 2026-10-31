@@ -1207,11 +1207,16 @@ documentsRouter.post(
 
       /** 添付ファイルの新キー移行情報一覧。 */
       const attachmentMigrations: Array<{ id: string; newR2Key: string }> = [];
+      /** 並列実行する R2 オブジェクト操作タスク一覧。 */
+      const r2Operations: Promise<unknown>[] = [];
+
       if (attachmentsResult?.results && attachmentsResult.results.length > 0) {
         for (const att of attachmentsResult.results) {
           const newAttKey = migrateR2KeyPrefix(att.r2_key, newPrefix);
           if (c.env.BUCKET && typeof c.env.BUCKET.get === 'function') {
-            await copyAndDeleteR2Object(c.env.BUCKET, att.r2_key, newAttKey);
+            r2Operations.push(
+              copyAndDeleteR2Object(c.env.BUCKET, att.r2_key, newAttKey),
+            );
           }
 
           if (updatedContentText && att.r2_key !== newAttKey) {
@@ -1232,24 +1237,30 @@ documentsRouter.post(
 
       if (c.env.BUCKET && typeof c.env.BUCKET.put === 'function') {
         if (updatedContentText !== null) {
-          await c.env.BUCKET.put(newContentKey, updatedContentText, {
-            httpMetadata: {
-              contentType: 'text/markdown; charset=utf-8',
-            },
-          });
-          if (
-            oldContentKey !== newContentKey &&
-            typeof c.env.BUCKET.delete === 'function'
-          ) {
-            await c.env.BUCKET.delete(oldContentKey);
-          }
+          r2Operations.push(
+            (async () => {
+              await c.env.BUCKET.put(newContentKey, updatedContentText, {
+                httpMetadata: {
+                  contentType: 'text/markdown; charset=utf-8',
+                },
+              });
+              if (
+                oldContentKey !== newContentKey &&
+                typeof c.env.BUCKET.delete === 'function'
+              ) {
+                await c.env.BUCKET.delete(oldContentKey);
+              }
+            })(),
+          );
         } else if (typeof c.env.BUCKET.get === 'function') {
-          await copyAndDeleteR2Object(
-            c.env.BUCKET,
-            oldContentKey,
-            newContentKey,
+          r2Operations.push(
+            copyAndDeleteR2Object(c.env.BUCKET, oldContentKey, newContentKey),
           );
         }
+      }
+
+      if (r2Operations.length > 0) {
+        await Promise.all(r2Operations);
       }
 
       if (attachmentMigrations.length > 0) {

@@ -629,6 +629,179 @@ describe('POST /api/documents/:id/renew (Markdown本文内画像URL置換およ�
       false,
     );
   });
+
+  test('POST /api/documents/:id/renew で複数の添付ファイルが存在する場合に並列でR2移行とURL置換が完了すること。', async () => {
+    const slug = 'RenwMulti123';
+    const oldContentKey = 'exp-1d/uploads/doc-multi/content.md';
+    const oldImageKey1 = 'exp-1d/uploads/img-1/chart1.png';
+    const oldImageKey2 = 'exp-1d/uploads/img-2/chart2.png';
+
+    const originalMarkdown = `# 複数画像ドキュメント
+画像1: ![図1](/api/assets/${oldImageKey1})
+画像2: ![図2](/api/assets/${oldImageKey2})
+`;
+
+    const r2Store = new Map<string, { body: string; contentType: string }>();
+    r2Store.set(oldContentKey, {
+      body: originalMarkdown,
+      contentType: 'text/markdown; charset=utf-8',
+    });
+    r2Store.set(oldImageKey1, {
+      body: 'fake-png-1',
+      contentType: 'image/png',
+    });
+    r2Store.set(oldImageKey2, {
+      body: 'fake-png-2',
+      contentType: 'image/png',
+    });
+
+    const mockBucket = {
+      get: async (key: string) => {
+        const item = r2Store.get(key);
+        if (!item) return null;
+        return {
+          text: async () => item.body,
+          body: item.body,
+          httpMetadata: { contentType: item.contentType },
+          customMetadata: {},
+        };
+      },
+      put: async (
+        key: string,
+        value: unknown,
+        options?: { httpMetadata?: { contentType?: string } },
+      ) => {
+        let bodyStr = '';
+        if (typeof value === 'string') {
+          bodyStr = value;
+        } else if (value instanceof Uint8Array) {
+          bodyStr = new TextDecoder().decode(value);
+        } else {
+          bodyStr = String(value);
+        }
+        r2Store.set(key, {
+          body: bodyStr,
+          contentType:
+            options?.httpMetadata?.contentType ?? 'application/octet-stream',
+        });
+        return {};
+      },
+      delete: async (key: string) => {
+        r2Store.delete(key);
+      },
+    };
+
+    const rawEditToken = generateCapabilityToken('edit');
+    const editTokenHash = await hashToken(rawEditToken);
+
+    const docRecord = {
+      id: slug,
+      title: '複数画像ドキュメント',
+      status: 'published',
+      expires_at: '2026-11-01T00:00:00.000Z',
+      content_r2_key: oldContentKey,
+      edit_token_hash: editTokenHash,
+      modify_token_hash: null,
+      passcode_hash: null,
+      owner_user_id: null,
+      owner_provider: null,
+    };
+
+    const attachmentRecords = [
+      {
+        id: 'att-1',
+        document_id: slug,
+        file_name: 'chart1.png',
+        file_size: 1024,
+        mime_type: 'image/png',
+        r2_key: oldImageKey1,
+      },
+      {
+        id: 'att-2',
+        document_id: slug,
+        file_name: 'chart2.png',
+        file_size: 2048,
+        mime_type: 'image/png',
+        r2_key: oldImageKey2,
+      },
+    ];
+
+    const mockDb = {
+      prepare: (query: string) => ({
+        bind: (..._args: unknown[]) => ({
+          first: async () => {
+            if (query.includes('FROM documents')) {
+              return docRecord;
+            }
+            return null;
+          },
+          all: async () => {
+            if (query.includes('FROM attachments')) {
+              return { results: attachmentRecords };
+            }
+            return { results: [] };
+          },
+          run: async () => ({ success: true }),
+        }),
+      }),
+      batch: async (_statements: unknown[]) => [],
+    };
+
+    const app = new Hono<AppEnv>();
+    app.route('/api/documents', documentsRouter);
+
+    const res = await app.request(
+      `/api/documents/${slug}/renew`,
+      {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${rawEditToken}`,
+        },
+        body: JSON.stringify({
+          expiration: '7days',
+        }),
+      },
+      {
+        DB: mockDb as unknown as D1Database,
+        BUCKET: mockBucket as unknown as R2Bucket,
+      },
+    );
+
+    assert.strictEqual(res.status, 200);
+
+    const expectedNewContentKey = 'exp-7d/uploads/doc-multi/content.md';
+    const expectedNewImageKey1 = 'exp-7d/uploads/img-1/chart1.png';
+    const expectedNewImageKey2 = 'exp-7d/uploads/img-2/chart2.png';
+
+    // 全ての新キーが存在し、旧キーが削除されている。
+    assert.strictEqual(r2Store.has(expectedNewContentKey), true);
+    assert.strictEqual(r2Store.has(oldContentKey), false);
+    assert.strictEqual(r2Store.has(expectedNewImageKey1), true);
+    assert.strictEqual(r2Store.has(oldImageKey1), false);
+    assert.strictEqual(r2Store.has(expectedNewImageKey2), true);
+    assert.strictEqual(r2Store.has(oldImageKey2), false);
+
+    // 本文内の全画像パスが置換されている。
+    const savedMarkdown = r2Store.get(expectedNewContentKey)?.body;
+    assert.ok(savedMarkdown);
+    assert.strictEqual(
+      savedMarkdown.includes(`/api/assets/${expectedNewImageKey1}`),
+      true,
+    );
+    assert.strictEqual(
+      savedMarkdown.includes(`/api/assets/${expectedNewImageKey2}`),
+      true,
+    );
+    assert.strictEqual(
+      savedMarkdown.includes(`/api/assets/${oldImageKey1}`),
+      false,
+    );
+    assert.strictEqual(
+      savedMarkdown.includes(`/api/assets/${oldImageKey2}`),
+      false,
+    );
+  });
 });
 
 describe('resolveDocumentExpectedPrefix (失効プレフィックス解決処理)', () => {
