@@ -30,6 +30,45 @@ export function extractExpirationPrefix(key: string): string | null {
 }
 
 /**
+ * ドキュメント情報から期待されるR2オブジェクトキーの失効プレフィックスを解決する。
+ * 本文キーにプレフィックスが含まれる場合はそれを優先し、
+ * 移行前のキー(temp/uploads/)等の場合は有効期限日時(expires_at)から算出する。
+ *
+ * @param doc - ドキュメントレコード情報。
+ * @returns 期待される失効プレフィックス文字列。
+ */
+export function resolveDocumentExpectedPrefix(doc: {
+  content_r2_key: string;
+  expires_at: string | null;
+  created_at?: string;
+}): string {
+  const extracted = extractExpirationPrefix(doc.content_r2_key);
+  if (extracted) {
+    return extracted;
+  }
+
+  if (doc.expires_at === null) {
+    return 'permanent/';
+  }
+
+  if (doc.created_at) {
+    const expiresMs = new Date(doc.expires_at).getTime();
+    const createdMs = new Date(doc.created_at).getTime();
+    const diffHours = (expiresMs - createdMs) / (1000 * 60 * 60);
+
+    if (diffHours <= 36) {
+      return 'exp-1d/';
+    }
+    if (diffHours <= 14 * 24) {
+      return 'exp-7d/';
+    }
+    return 'exp-30d/';
+  }
+
+  return 'exp-7d/';
+}
+
+/**
  * 既存のR2オブジェクトキーのプレフィックスを新しいプレフィックスへ付け替える。
  *
  * @param oldKey - 付け替え元のR2オブジェクトキー。

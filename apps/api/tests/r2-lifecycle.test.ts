@@ -14,6 +14,7 @@ import {
   getExpirationPrefix,
   isValidR2Key,
   migrateR2KeyPrefix,
+  resolveDocumentExpectedPrefix,
 } from '../src/lib/r2.ts';
 import { uploadRouter } from '../src/routes/upload.ts';
 import { documentsRouter } from '../src/routes/documents.ts';
@@ -529,7 +530,7 @@ describe('POST /api/documents/:id/renew (Markdown本文内画像URL置換およ�
       },
     };
 
-    let docRecord = {
+    const docRecord = {
       id: slug,
       title: 'テストドキュメント',
       description: '説明文',
@@ -559,7 +560,7 @@ describe('POST /api/documents/:id/renew (Markdown本文内画像URL置換およ�
 
     const mockDb = {
       prepare: (query: string) => ({
-        bind: (...args: unknown[]) => ({
+        bind: (..._args: unknown[]) => ({
           first: async () => {
             if (query.includes('FROM documents')) {
               return docRecord;
@@ -575,7 +576,7 @@ describe('POST /api/documents/:id/renew (Markdown本文内画像URL置換およ�
           run: async () => ({ success: true }),
         }),
       }),
-      batch: async (statements: unknown[]) => {
+      batch: async (_statements: unknown[]) => {
         // バッチ実行のシミュレーション。
         return [];
       },
@@ -626,6 +627,215 @@ describe('POST /api/documents/:id/renew (Markdown本文内画像URL置換およ�
     assert.strictEqual(
       savedMarkdown.includes(`/api/assets/${oldImageKey}`),
       false,
+    );
+  });
+});
+
+describe('resolveDocumentExpectedPrefix (失効プレフィックス解決処理)', () => {
+  test('本文キーに新プレフィックスが含まれる場合はそれを優先すること。', () => {
+    assert.strictEqual(
+      resolveDocumentExpectedPrefix({
+        content_r2_key: 'exp-1d/uploads/abc/content.md',
+        expires_at: '2026-11-01T00:00:00.000Z',
+      }),
+      'exp-1d/',
+    );
+    assert.strictEqual(
+      resolveDocumentExpectedPrefix({
+        content_r2_key: 'exp-30d/uploads/abc/content.md',
+        expires_at: null,
+      }),
+      'exp-30d/',
+    );
+  });
+
+  test('移行前キー(temp/uploads/)かつ無期限(expires_at === null)の場合は permanent/ を返却すること。', () => {
+    assert.strictEqual(
+      resolveDocumentExpectedPrefix({
+        content_r2_key: 'temp/uploads/abc/content.md',
+        expires_at: null,
+      }),
+      'permanent/',
+    );
+  });
+
+  test('移行前キー(temp/uploads/)のドキュメント有効期限日時から正確なプレフィックスを推測すること。', () => {
+    const createdAt = '2026-10-01T00:00:00.000Z';
+
+    // 24時間後 (1day)
+    assert.strictEqual(
+      resolveDocumentExpectedPrefix({
+        content_r2_key: 'temp/uploads/abc/content.md',
+        expires_at: '2026-10-02T00:00:00.000Z',
+        created_at: createdAt,
+      }),
+      'exp-1d/',
+    );
+
+    // 7日後 (7days)
+    assert.strictEqual(
+      resolveDocumentExpectedPrefix({
+        content_r2_key: 'temp/uploads/abc/content.md',
+        expires_at: '2026-10-08T00:00:00.000Z',
+        created_at: createdAt,
+      }),
+      'exp-7d/',
+    );
+
+    // 30日後 (30days)
+    assert.strictEqual(
+      resolveDocumentExpectedPrefix({
+        content_r2_key: 'temp/uploads/abc/content.md',
+        expires_at: '2026-10-31T00:00:00.000Z',
+        created_at: createdAt,
+      }),
+      'exp-30d/',
+    );
+  });
+});
+
+describe('PUT /api/documents/:id (移行前旧プレフィックスドキュメントの更新フォールバック検証)', () => {
+  let ipCounter = 100;
+  const nextIp = () => `198.51.100.${ipCounter++}`;
+
+  async function buildPutTestApp() {
+    const slug = 'XyZ123456789';
+    const rawModifyToken = generateCapabilityToken('modify');
+    const modifyTokenHash = await hashToken(rawModifyToken);
+
+    // 移行前の旧形式キー(temp/uploads/)で作成された7日間ドキュメント。
+    const docRecord = {
+      id: slug,
+      title: '旧形式ドキュメント',
+      description: '説明',
+      content_r2_key: 'temp/uploads/old-doc/content.md',
+      status: 'published',
+      expires_at: '2026-10-08T00:00:00.000Z',
+      created_at: '2026-10-01T00:00:00.000Z',
+      updated_at: '2026-10-01T00:00:00.000Z',
+      edit_token_hash: null,
+      modify_token_hash: modifyTokenHash,
+      owner_user_id: null,
+      owner_provider: null,
+      visibility: 'public',
+      passcode_hash: null,
+    };
+
+    const mockDb = {
+      prepare: (query: string) => ({
+        bind: (..._args: unknown[]) => ({
+          first: async () => {
+            if (query.includes('FROM documents')) {
+              return docRecord;
+            }
+            return null;
+          },
+          run: async () => ({ success: true }),
+        }),
+      }),
+      batch: async () => [],
+    };
+
+    const mockBucket = {
+      head: async () => ({ size: 1024 }),
+    };
+
+    const app = new Hono<AppEnv>();
+    app.route('/api/documents', documentsRouter);
+
+    return {
+      app,
+      slug,
+      modifyToken: rawModifyToken,
+      env: {
+        DB: mockDb as unknown as D1Database,
+        BUCKET: mockBucket as unknown as R2Bucket,
+      },
+    };
+  }
+
+  test('旧プレフィックスドキュメントに対し、推定された新プレフィックス(exp-7d/)のキーで更新できること。', async () => {
+    const { app, slug, modifyToken, env } = await buildPutTestApp();
+
+    const res = await app.request(
+      `/api/documents/${slug}`,
+      {
+        method: 'PUT',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${modifyToken}`,
+          'cf-connecting-ip': nextIp(),
+        },
+        body: JSON.stringify({
+          title: '更新後タイトル',
+          contentR2Key: 'exp-7d/uploads/new-doc/content.md',
+          attachments: [
+            {
+              id: 'att-1',
+              fileName: 'img.png',
+              fileSize: 1024,
+              mimeType: 'image/png',
+              r2Key: 'exp-7d/uploads/new-img/img.png',
+            },
+          ],
+        }),
+      },
+      env,
+    );
+
+    assert.strictEqual(res.status, 200);
+  });
+
+  test('旧プレフィックスドキュメントに対し、旧キー形式(temp/uploads/)を維持した更新も後方互換で成功すること。', async () => {
+    const { app, slug, modifyToken, env } = await buildPutTestApp();
+
+    const res = await app.request(
+      `/api/documents/${slug}`,
+      {
+        method: 'PUT',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${modifyToken}`,
+          'cf-connecting-ip': nextIp(),
+        },
+        body: JSON.stringify({
+          title: '更新後タイトル(旧キー維持)',
+          contentR2Key: 'temp/uploads/old-doc/content.md',
+          attachments: [],
+        }),
+      },
+      env,
+    );
+
+    assert.strictEqual(res.status, 200);
+  });
+
+  test('旧プレフィックスドキュメントに対し、推定プレフィックスと不一致なキー(exp-30d/)での更新は 400 Bad Request となること。', async () => {
+    const { app, slug, modifyToken, env } = await buildPutTestApp();
+
+    const res = await app.request(
+      `/api/documents/${slug}`,
+      {
+        method: 'PUT',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${modifyToken}`,
+          'cf-connecting-ip': nextIp(),
+        },
+        body: JSON.stringify({
+          title: '不一致更新',
+          contentR2Key: 'exp-30d/uploads/new-doc/content.md', // 推定プレフィックスは exp-7d/ なので不一致
+          attachments: [],
+        }),
+      },
+      env,
+    );
+
+    assert.strictEqual(res.status, 400);
+    const body = (await res.json()) as { error: { message: string } };
+    assert.match(
+      body.error.message,
+      /既存ドキュメントの有効期限プレフィックスと本文ストレージキーが一致しません/,
     );
   });
 });

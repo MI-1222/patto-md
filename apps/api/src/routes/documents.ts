@@ -47,11 +47,11 @@ import { hashPasscode, verifyPasscode } from '../lib/passcode.ts';
 import {
   checkR2ObjectExists,
   copyAndDeleteR2Object,
-  extractExpirationPrefix,
   getExpirationPrefix,
   getR2Text,
   isValidR2Key,
   migrateR2KeyPrefix,
+  resolveDocumentExpectedPrefix,
 } from '../lib/r2.ts';
 import { getClientIp } from '../lib/rate-limit.ts';
 import { hashClientIp } from '../lib/ip-hash.ts';
@@ -865,23 +865,22 @@ documentsRouter.put(
       );
     }
 
-    /** 既存ドキュメントの本文キーから抽出した現在の失効プレフィックス。 */
-    const currentPrefix = extractExpirationPrefix(authDoc.content_r2_key);
-    if (currentPrefix) {
-      if (
-        !contentR2Key.startsWith(currentPrefix) &&
-        !contentR2Key.startsWith('temp/uploads/')
-      ) {
-        return c.json(
-          {
-            error: {
-              message:
-                '既存ドキュメントの有効期限プレフィックスと本文ストレージキーが一致しません。',
-            },
+    /** 既存ドキュメントの失効設定から期待されるR2プレフィックス。 */
+    const expectedPrefix = resolveDocumentExpectedPrefix(authDoc);
+
+    if (
+      !contentR2Key.startsWith(expectedPrefix) &&
+      !contentR2Key.startsWith('temp/uploads/')
+    ) {
+      return c.json(
+        {
+          error: {
+            message:
+              '既存ドキュメントの有効期限プレフィックスと本文ストレージキーが一致しません。',
           },
-          400,
-        );
-      }
+        },
+        400,
+      );
     }
 
     for (const attachment of attachments) {
@@ -895,20 +894,18 @@ documentsRouter.put(
           400,
         );
       }
-      if (currentPrefix) {
-        if (
-          !attachment.r2Key.startsWith(currentPrefix) &&
-          !attachment.r2Key.startsWith('temp/uploads/')
-        ) {
-          return c.json(
-            {
-              error: {
-                message: `添付ファイル「${attachment.fileName}」のストレージキーが有効期限プレフィックスと一致しません。`,
-              },
+      if (
+        !attachment.r2Key.startsWith(expectedPrefix) &&
+        !attachment.r2Key.startsWith('temp/uploads/')
+      ) {
+        return c.json(
+          {
+            error: {
+              message: `添付ファイル「${attachment.fileName}」のストレージキーが有効期限プレフィックスと一致しません。`,
             },
-            400,
-          );
-        }
+          },
+          400,
+        );
       }
     }
 
