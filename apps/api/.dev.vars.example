@@ -54,3 +54,9 @@ DISCORD_CLIENT_SECRET="your-discord-client-secret"
 # 未指定時はリクエストURLのオリジンが自動採用される。
 # 本番環境でカスタムドメイン等へ固定したい場合に指定する。
 AUTH_REDIRECT_BASE_URL="http://localhost:8787"
+
+# JWT 署名シークレットキー:
+# ユーザーセッション (OAuth2) やパスコード閲覧トークン (JWT) の署名・検証に使用する。
+# `openssl rand -base64 32` などで生成した十分な長さ (32文字以上推奨) のランダム文字列を指定する。
+# 未指定時は R2_SECRET_ACCESS_KEY または開発用のデフォルト値が自動適用される。
+JWT_SECRET="your-jwt-secret-key-at-least-32-chars"
