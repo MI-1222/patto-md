@@ -31,6 +31,8 @@ export interface CompressedImageResult {
   wasCompressed: boolean;
 }
 
+import { MAX_TOTAL_FILE_SIZE } from '@patto-md/shared';
+
 /** 規定の最大長辺ピクセル数 (1920px)。 */
 export const DEFAULT_MAX_DIMENSION = 1920;
 
@@ -39,6 +41,62 @@ export const DEFAULT_QUALITY = 0.8;
 
 /** 生画像受け入れの最大許容サイズ (バイト単位、25MB)。 */
 export const MAX_RAW_IMAGE_FILE_SIZE = 25 * 1024 * 1024;
+
+/** ドロップ受け入れ時の生ファイル合計安全上限 (バイト単位、100MB)。 */
+export const MAX_RAW_TOTAL_FILE_SIZE = 100 * 1024 * 1024;
+
+/** 画像圧縮後の見込みサイズ比率 (元サイズの20%)。 */
+export const COMPRESSION_ESTIMATE_RATIO = 0.2;
+
+/**
+ * 画像およびファイルの圧縮後見込みサイズを算出する。
+ *
+ * 圧縮スキップ対象 (SVGやGIF) およびテキストファイルは原本サイズをそのまま採用する。
+ * 圧縮対象画像 (PNGやJPEG等) は長辺1920pxリサイズとWebP品質0.8の適用を想定し、
+ * 元サイズの約20% (下限200KB、上限は元サイズ) として見積もる。
+ *
+ * @param file - サイズ算出対象ファイル情報。
+ * @returns 算出された見込みバイトサイズ。
+ */
+export function estimateCompressedSize(file: {
+  size: number;
+  name: string;
+  type?: string;
+}): number {
+  if (shouldSkipCompression(file)) {
+    return file.size;
+  }
+  const ext = (file.name.split('.').pop() || '').toLowerCase();
+  const isImageExt = ['png', 'jpg', 'jpeg', 'webp', 'bmp'].includes(ext);
+  const isImageMime = (file.type || '').startsWith('image/');
+
+  if (!isImageExt && !isImageMime) {
+    return file.size;
+  }
+
+  const estimated = Math.round(file.size * COMPRESSION_ESTIMATE_RATIO);
+  return Math.min(file.size, Math.max(200 * 1024, estimated));
+}
+
+/**
+ * ファイル群の合計サイズが許容上限を超過しているかを判定する。
+ *
+ * 圧縮見込み合計サイズが上限 (`30MB`) を超過している場合、
+ * または生ファイル合計サイズが極端な安全上限 (`100MB`) を超過している場合に `true` を返却する。
+ *
+ * @param rawTotalBytes - 生ファイルの合計バイトサイズ。
+ * @param estimatedTotalBytes - 圧縮見込みを考慮した合計バイトサイズ。
+ * @returns 許容上限を超過している場合は `true`、許容範囲内の場合は `false`。
+ */
+export function isTotalFileSizeExceeded(
+  rawTotalBytes: number,
+  estimatedTotalBytes: number,
+): boolean {
+  if (rawTotalBytes > MAX_RAW_TOTAL_FILE_SIZE) {
+    return true;
+  }
+  return estimatedTotalBytes > MAX_TOTAL_FILE_SIZE;
+}
 
 /**
  * ファイルのMIMEタイプを拡張子を含めて安全に推定・解決する。

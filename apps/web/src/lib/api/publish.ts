@@ -1,10 +1,11 @@
-import type {
-  DocumentAttachmentCommit,
-  DocumentCommitResponse,
-  DocumentVisibility,
-  ExpirationPreset,
-  UploadSignFileItem,
-  UploadSignFileResponseItem,
+import {
+  MAX_TOTAL_FILE_SIZE,
+  type DocumentAttachmentCommit,
+  type DocumentCommitResponse,
+  type DocumentVisibility,
+  type ExpirationPreset,
+  type UploadSignFileItem,
+  type UploadSignFileResponseItem,
 } from '@patto-md/shared';
 import { requestUploadSign, uploadToR2, commitDocument } from './client';
 import {
@@ -179,6 +180,20 @@ export async function executePublishPipeline(
         percent,
       });
     }
+  }
+
+  /** 最適化後画像アセットとMarkdown本文の最終合計サイズ(バイト)。 */
+  const finalTotalUploadSize =
+    markdownFile.file.size +
+    uniqueResolvedAssets.reduce((sum, asset) => {
+      const comp = compressedAssetMap.get(asset.relativePath);
+      return sum + (comp ? comp.size : asset.file.size);
+    }, 0);
+
+  if (finalTotalUploadSize > MAX_TOTAL_FILE_SIZE) {
+    throw new Error(
+      'アップロードファイルの合計サイズが上限(30MB)を超過しています。',
+    );
   }
 
   onProgress?.({

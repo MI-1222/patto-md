@@ -6,6 +6,8 @@ import {
   compressImage,
   compressImagesConcurrently,
   DEFAULT_MAX_DIMENSION,
+  estimateCompressedSize,
+  isTotalFileSizeExceeded,
 } from '../compress';
 
 describe('クライアントサイド画像圧縮・WebP変換エンジン (`compress.ts`)', () => {
@@ -292,6 +294,96 @@ describe('クライアントサイド画像圧縮・WebP変換エンジン (`com
         { current: 2, total: 3 },
         { current: 3, total: 3 },
       ]);
+    });
+  });
+
+  describe('圧縮後見込みサイズ算出 (`estimateCompressedSize`)', () => {
+    it('SVGやGIFは原本サイズがそのまま見込みサイズとして返却されること。', () => {
+      const svg = { size: 15000, name: 'vector.svg', type: 'image/svg+xml' };
+      expect(estimateCompressedSize(svg)).toBe(15000);
+
+      const gif = { size: 80000, name: 'animation.gif', type: 'image/gif' };
+      expect(estimateCompressedSize(gif)).toBe(80000);
+    });
+
+    it('Markdown等の非画像ファイルは原本サイズが返却されること。', () => {
+      const md = { size: 5000, name: 'doc.md', type: 'text/markdown' };
+      expect(estimateCompressedSize(md)).toBe(5000);
+    });
+
+    it('圧縮対象画像は約20%で見積もられること。', () => {
+      const largePng = {
+        size: 10 * 1024 * 1024,
+        name: 'photo.png',
+        type: 'image/png',
+      };
+      const estimated = estimateCompressedSize(largePng);
+      expect(estimated).toBe(Math.round(10 * 1024 * 1024 * 0.2));
+    });
+  });
+
+  describe('合計サイズ上限判定 (`isTotalFileSizeExceeded`)', () => {
+    it('15MBの画像2枚 (生合計30MB、見込み約6MB) は上限超過と判定されないこと。', () => {
+      const rawTotal = 30 * 1024 * 1024; // 30MB
+      const estimatedTotal = 6 * 1024 * 1024; // 6MB
+      expect(isTotalFileSizeExceeded(rawTotal, estimatedTotal)).toBe(false);
+    });
+
+    it('生ファイル合計が100MBを超過している場合は超過と判定されること。', () => {
+      const rawTotal = 101 * 1024 * 1024;
+      const estimatedTotal = 10 * 1024 * 1024;
+      expect(isTotalFileSizeExceeded(rawTotal, estimatedTotal)).toBe(true);
+    });
+
+    it('圧縮見込み合計が30MBを超過している場合は超過と判定されること。', () => {
+      const rawTotal = 80 * 1024 * 1024;
+      const estimatedTotal = 31 * 1024 * 1024;
+      expect(isTotalFileSizeExceeded(rawTotal, estimatedTotal)).toBe(true);
+    });
+  });
+
+  describe('圧縮後見込みサイズ算出 (`estimateCompressedSize`)', () => {
+    it('SVGやGIFは原本サイズがそのまま見込みサイズとして返却されること。', () => {
+      const svg = { size: 15000, name: 'vector.svg', type: 'image/svg+xml' };
+      expect(estimateCompressedSize(svg)).toBe(15000);
+
+      const gif = { size: 80000, name: 'animation.gif', type: 'image/gif' };
+      expect(estimateCompressedSize(gif)).toBe(80000);
+    });
+
+    it('Markdown等の非画像ファイルは原本サイズが返却されること。', () => {
+      const md = { size: 5000, name: 'doc.md', type: 'text/markdown' };
+      expect(estimateCompressedSize(md)).toBe(5000);
+    });
+
+    it('圧縮対象画像は約20%で見積もられること。', () => {
+      const largePng = {
+        size: 10 * 1024 * 1024,
+        name: 'photo.png',
+        type: 'image/png',
+      };
+      const estimated = estimateCompressedSize(largePng);
+      expect(estimated).toBe(Math.round(10 * 1024 * 1024 * 0.2));
+    });
+  });
+
+  describe('合計サイズ上限判定 (`isTotalFileSizeExceeded`)', () => {
+    it('15MBの画像2枚 (生合計30MB、見込み約6MB) は上限超過と判定されないこと。', () => {
+      const rawTotal = 30 * 1024 * 1024; // 30MB
+      const estimatedTotal = 6 * 1024 * 1024; // 6MB
+      expect(isTotalFileSizeExceeded(rawTotal, estimatedTotal)).toBe(false);
+    });
+
+    it('生ファイル合計が100MBを超過している場合は超過と判定されること。', () => {
+      const rawTotal = 101 * 1024 * 1024;
+      const estimatedTotal = 10 * 1024 * 1024;
+      expect(isTotalFileSizeExceeded(rawTotal, estimatedTotal)).toBe(true);
+    });
+
+    it('圧縮見込み合計が30MBを超過している場合は超過と判定されること。', () => {
+      const rawTotal = 80 * 1024 * 1024;
+      const estimatedTotal = 31 * 1024 * 1024;
+      expect(isTotalFileSizeExceeded(rawTotal, estimatedTotal)).toBe(true);
     });
   });
 });

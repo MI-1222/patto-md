@@ -15,7 +15,11 @@ import {
   reconcileAssets,
   type ResolvedAsset,
 } from '../markdown';
-import { compressImage, type CompressedImageResult } from '../storage';
+import {
+  compressImage,
+  type CompressedImageResult,
+  MAX_RAW_TOTAL_FILE_SIZE,
+} from '../storage';
 import { resolveFileMimeType } from './publish';
 
 /** 更新パイプラインの進行進捗情報の定義。 */
@@ -178,13 +182,12 @@ export async function executeUpdatePipeline(
     throw new Error('Markdown本文が入力されていません。');
   }
 
-  /** 既存添付ファイルと新規追加ファイルの合計サイズ(バイト)。 */
-  const totalAttachmentSize =
-    existingAttachments.reduce((sum, att) => sum + att.fileSize, 0) +
-    newFiles.reduce((sum, file) => sum + file.size, 0);
-
-  if (totalAttachmentSize > MAX_TOTAL_FILE_SIZE) {
-    throw new Error('添付ファイルの合計サイズが上限(30MB)を超過しています。');
+  /** 新規追加ファイルの生サイズ合計が安全上限(100MB)を超過していないかの事前検証。 */
+  const rawNewFilesSize = newFiles.reduce((sum, file) => sum + file.size, 0);
+  if (rawNewFilesSize > MAX_RAW_TOTAL_FILE_SIZE) {
+    throw new Error(
+      '追加ファイルの生合計サイズが上限(100MB)を超過しています。',
+    );
   }
 
   /** Markdown構文木の解析結果。 */
@@ -255,6 +258,18 @@ export async function executeUpdatePipeline(
         percent,
       });
     }
+  }
+
+  /** 既存添付ファイルと最適化後新規添付ファイルの最終合計サイズ(バイト)。 */
+  const finalTotalAttachmentSize =
+    existingAttachments.reduce((sum, att) => sum + att.fileSize, 0) +
+    uniqueResolvedAssets.reduce((sum, asset) => {
+      const comp = compressedAssetMap.get(asset.relativePath);
+      return sum + (comp ? comp.size : asset.file.size);
+    }, 0);
+
+  if (finalTotalAttachmentSize > MAX_TOTAL_FILE_SIZE) {
+    throw new Error('添付ファイルの合計サイズが上限(30MB)を超過しています。');
   }
 
   onProgress?.({

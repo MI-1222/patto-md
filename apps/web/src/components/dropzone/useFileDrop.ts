@@ -1,13 +1,14 @@
 import { useEffect, useRef, useState, useCallback } from 'react';
 import {
   MAX_SINGLE_FILE_SIZE,
-  MAX_TOTAL_FILE_SIZE,
   ALLOWED_IMAGE_MIME_TYPES,
   ALLOWED_TEXT_MIME_TYPES,
 } from '@patto-md/shared';
 import {
   shouldSkipCompression,
   MAX_RAW_IMAGE_FILE_SIZE,
+  estimateCompressedSize,
+  isTotalFileSizeExceeded,
 } from '../../lib/storage';
 import type { VirtualFile, ParsedFiles, DropZoneStatus } from './types';
 
@@ -245,11 +246,13 @@ export function useFileDrop() {
       let primaryMarkdown: VirtualFile | null = null;
       const assetMap = new Map<string, VirtualFile>();
       let totalBytes = 0;
+      let estimatedTotalBytes = 0;
       let hasError = false;
 
       for (const item of rawFiles) {
         const { file, relativePath } = item;
         totalBytes += file.size;
+        estimatedTotalBytes += estimateCompressedSize(file);
 
         const isMd = isMarkdownFile(file);
         const isImg = isSupportedImage(file);
@@ -274,7 +277,10 @@ export function useFileDrop() {
         }
       }
 
-      const isTotalOver = totalBytes > MAX_TOTAL_FILE_SIZE;
+      const isTotalOver = isTotalFileSizeExceeded(
+        totalBytes,
+        estimatedTotalBytes,
+      );
       if (isTotalOver) {
         hasError = true;
       }
@@ -330,18 +336,25 @@ export function useFileDrop() {
 
         // 合計サイズおよびエラー状態の再計算。
         let totalBytes = primaryMarkdown ? primaryMarkdown.file.size : 0;
+        let estimatedTotalBytes = primaryMarkdown
+          ? estimateCompressedSize(primaryMarkdown.file)
+          : 0;
         let hasError = primaryMarkdown
           ? primaryMarkdown.isSizeExceeded || primaryMarkdown.isTypeUnsupported
           : false;
 
         for (const asset of nextAssetMap.values()) {
           totalBytes += asset.file.size;
+          estimatedTotalBytes += estimateCompressedSize(asset.file);
           if (asset.isSizeExceeded || asset.isTypeUnsupported) {
             hasError = true;
           }
         }
 
-        const isTotalOver = totalBytes > MAX_TOTAL_FILE_SIZE;
+        const isTotalOver = isTotalFileSizeExceeded(
+          totalBytes,
+          estimatedTotalBytes,
+        );
         if (isTotalOver) {
           hasError = true;
         }
