@@ -83,6 +83,24 @@
   outline-offset: 1px;
 }
 
+/* モバイル端末(画面幅640px未満)におけるアンカー位置とサイズの微調整。 */
+@media (max-width: 640px) {
+  .line-anchor {
+    left: -1.25rem;
+    width: 1.125rem;
+    height: 1.125rem;
+  }
+
+  .line-anchor-icon {
+    font-size: 0.75em;
+  }
+
+  /* タッチ端末での見出しリンク視認性向上。 */
+  .heading-anchor {
+    opacity: 0.35;
+  }
+}
+
 pre[class*='language-'] {
   background-color: #121215;
   border: 1px solid #27272a;
