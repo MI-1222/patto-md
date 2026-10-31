@@ -17,7 +17,7 @@ import {
   type ExistingAttachmentItem,
 } from '../../lib/api/update';
 import { renderMarkdown } from '../../lib/markdown';
-import { renderAllMermaidBlocks } from '../../lib/mermaid';
+import { renderAllMermaidBlocks, loadPele } from '../../lib/mermaid';
 import { TurnstileWidget } from '../turnstile';
 import { EditIcon, KeyIcon, TrashIcon, CloudUploadSvg } from '../svg';
 
@@ -117,6 +117,10 @@ export const DocumentEditContainer: FC<DocumentEditContainerProps> = ({
       clearTimeout(timer);
     };
   }, [markdownContent, apiBaseUrl]);
+
+  useEffect(() => {
+    void loadPele();
+  }, []);
 
   useEffect(() => {
     if (previewContainerRef.current) {

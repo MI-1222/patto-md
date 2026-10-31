@@ -46,15 +46,32 @@ export function getSvgCacheSize(): number {
   return svgCache.size;
 }
 
+/** `pele` モジュールのキャッシュインスタンス。 */
+let peleModule: typeof import('pele') | null = null;
+
 /** `pele` モジュールの遅延インポート結果を保持するキャッシュ `Promise`。 */
 let peleModulePromise: Promise<typeof import('pele')> | null = null;
 
-/** `pele` モジュールを動的に遅延インポートする。キャッシュ済みの `Promise` を再利用する。 */
-async function loadPele(): Promise<typeof import('pele')> {
+/**
+ * `pele` モジュールを動的に遅延インポートする。
+ * 一度ロードされた後はメモリ内のモジュールを即座に再利用する。
+ */
+export async function loadPele(): Promise<typeof import('pele')> {
+  if (peleModule) {
+    return peleModule;
+  }
   if (!peleModulePromise) {
-    peleModulePromise = import('pele');
+    peleModulePromise = import('pele').then((mod) => {
+      peleModule = mod;
+      return mod;
+    });
   }
   return peleModulePromise;
+}
+
+/** `pele` が既にメモリ上に読み込み済みであるかを判定する。 */
+export function isPeleLoaded(): boolean {
+  return peleModule !== null;
 }
 
 /** Mermaidレンダリング結果の型定義。 */
@@ -66,8 +83,46 @@ export interface MermaidRenderResult {
 }
 
 /**
+ * `pele` が既にインポートされている場合に、Mermaidコードから同期的にSVGを生成する。
+ *
+ * @param code - 描画対象のMermaidコード文字列。
+ * @returns SVG文字列またはエラー情報を含む結果。
+ */
+export function renderMermaidToSvgSync(code: string): MermaidRenderResult {
+  const trimmed = code.trim();
+  if (!trimmed) {
+    return { error: 'ダイアグラムのコードが空です。' };
+  }
+
+  const cached = getCachedSvg(trimmed);
+  if (cached) {
+    return { svg: cached };
+  }
+
+  if (!peleModule) {
+    return { error: 'Mermaid描画エンジンが初期化されていません。' };
+  }
+
+  try {
+    const result = peleModule.render(trimmed);
+    if (!result || typeof result.svg !== 'string') {
+      return { error: 'SVGの生成に失敗しました。' };
+    }
+
+    setCachedSvg(trimmed, result.svg);
+    return { svg: result.svg };
+  } catch (err) {
+    const message =
+      err instanceof Error
+        ? err.message
+        : '構文解析または描画処理に失敗しました。';
+    return { error: message };
+  }
+}
+
+/**
  * Mermaidコード文字列からSVGを生成する。
- * キャッシュが存在する場合は即座に返却し、未生成の場合は `pele` を用いて同期パースする。
+ * `pele` がロード済みの場合は同期的に高速処理し、未ロードの場合は遅延インポート後に描画する。
  *
  * @param code - 描画対象のMermaidコード文字列。
  * @returns SVG文字列またはエラー情報を含む結果。
@@ -85,15 +140,13 @@ export async function renderMermaidToSvg(
     return { svg: cached };
   }
 
-  try {
-    const { render } = await loadPele();
-    const result = render(trimmed);
-    if (!result || typeof result.svg !== 'string') {
-      return { error: 'SVGの生成に失敗しました。' };
-    }
+  if (peleModule) {
+    return renderMermaidToSvgSync(trimmed);
+  }
 
-    setCachedSvg(trimmed, result.svg);
-    return { svg: result.svg };
+  try {
+    await loadPele();
+    return renderMermaidToSvgSync(trimmed);
   } catch (err) {
     const message =
       err instanceof Error
@@ -226,6 +279,9 @@ export function openMermaidModal(
   document.addEventListener('keydown', handleKeyDown);
 }
 
+/** 各要素の描画リクエスト競合を検知・制御するためのインクリメンタルシーケンス番号。 */
+let renderRequestSeq = 0;
+
 /**
  * 単一の `.mermaid-block` 要素を解析し、SVGおよびインタラクティブUIを展開する。
  *
@@ -249,9 +305,21 @@ export async function renderMermaidElement(
     return;
   }
 
-  container.setAttribute('data-mermaid-rendered', 'true');
+  const wasConnected =
+    'isConnected' in container ? container.isConnected : true;
+  const currentRequestId = String(++renderRequestSeq);
+  container.setAttribute('data-render-id', currentRequestId);
 
   const { svg, error } = await renderMermaidToSvg(trimmed);
+
+  if (
+    (wasConnected && 'isConnected' in container && !container.isConnected) ||
+    container.getAttribute('data-render-id') !== currentRequestId
+  ) {
+    return;
+  }
+
+  container.setAttribute('data-mermaid-rendered', 'true');
 
   container.innerHTML = '';
 

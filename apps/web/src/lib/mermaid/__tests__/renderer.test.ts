@@ -1,9 +1,12 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import {
   renderMermaidToSvg,
+  renderMermaidToSvgSync,
   renderMermaidElement,
   renderAllMermaidBlocks,
   openMermaidModal,
+  loadPele,
+  isPeleLoaded,
   clearSvgCache,
   getSvgCacheSize,
   MAX_SVG_CACHE_SIZE,
@@ -33,6 +36,13 @@ class MockElement {
 
   constructor(tagName: string) {
     this.tagName = tagName.toUpperCase();
+  }
+
+  get isConnected(): boolean {
+    if (this.tagName === 'BODY') {
+      return true;
+    }
+    return this.parentElement ? this.parentElement.isConnected : false;
   }
 
   get innerHTML(): string {
@@ -440,5 +450,115 @@ describe('DOMマウント処理 (renderMermaidElement / renderAllMermaidBlocks)'
       mockDoc.body.children.find((c) => c.id === 'mermaid-zoom-modal'),
     ).toBeDefined();
     expect(mockDoc.body.style.overflow).toBe('hidden');
+  });
+
+  it('loadPele で事前にウォームアップした後は renderMermaidToSvgSync で同期描画できること。', async () => {
+    await loadPele();
+    expect(isPeleLoaded()).toBe(true);
+
+    const result = renderMermaidToSvgSync('flowchart LR\n  Alpha --> Beta');
+    expect(result.error).toBeUndefined();
+    expect(result.svg).toBeDefined();
+    expect(result.svg).toContain('<svg');
+  });
+
+  it('renderMermaidElement で競合する後続リクエストが発生した場合は古い描画結果を破棄すること。', async () => {
+    const container = mockDoc.createElement('div');
+    container.className = 'mermaid-block';
+    container.setAttribute(
+      'data-mermaid-code',
+      'flowchart TD\n  Old --> Diagram',
+    );
+    mockDoc.body.appendChild(container);
+
+    // 1回目の描画を開始（非同期）
+    const firstRenderPromise = renderMermaidElement(
+      container as unknown as HTMLElement,
+    );
+
+    // 即座に新しいコードが入力され、リクエストIDが上書きされた状況をシミュレート
+    container.setAttribute('data-render-id', '999999');
+
+    await firstRenderPromise;
+
+    // 古いリクエストは破棄されるため、data-mermaid-rendered="true" は付与されず、中身も空のまま
+    expect(container.getAttribute('data-mermaid-rendered')).toBeNull();
+  });
+
+  it('renderMermaidElement で描画完了前に要素がDOMから切り離された場合は更新を破棄すること。', async () => {
+    const container = mockDoc.createElement('div');
+    container.className = 'mermaid-block';
+    container.setAttribute(
+      'data-mermaid-code',
+      'flowchart TD\n  Detached --> Test',
+    );
+    mockDoc.body.appendChild(container);
+
+    const renderPromise = renderMermaidElement(
+      container as unknown as HTMLElement,
+    );
+
+    // 描画処理中に親要素からデタッチされた状況をシミュレート
+    container.remove();
+
+    await renderPromise;
+
+    // デタッチされた要素に対するDOM更新は破棄され、data-mermaid-rendered="true" も付与されないこと
+    expect(container.getAttribute('data-mermaid-rendered')).toBeNull();
+  });
+
+  it('loadPele で事前にウォームアップした後は renderMermaidToSvgSync で同期描画できること。', async () => {
+    await loadPele();
+    expect(isPeleLoaded()).toBe(true);
+
+    const result = renderMermaidToSvgSync('flowchart LR\n  Alpha --> Beta');
+    expect(result.error).toBeUndefined();
+    expect(result.svg).toBeDefined();
+    expect(result.svg).toContain('<svg');
+  });
+
+  it('renderMermaidElement で競合する後続リクエストが発生した場合は古い描画結果を破棄すること。', async () => {
+    const container = mockDoc.createElement('div');
+    container.className = 'mermaid-block';
+    container.setAttribute(
+      'data-mermaid-code',
+      'flowchart TD\n  Old --> Diagram',
+    );
+    mockDoc.body.appendChild(container);
+
+    // 1回目の描画を開始（非同期）
+    const firstRenderPromise = renderMermaidElement(
+      container as unknown as HTMLElement,
+    );
+
+    // 即座に新しいコードが入力され、リクエストIDが上書きされた状況をシミュレート
+    container.setAttribute('data-render-id', '999999');
+
+    await firstRenderPromise;
+
+    // 古いリクエストは破棄されるため、data-mermaid-rendered="true" は付与されず、中身も空のまま
+    expect(container.getAttribute('data-mermaid-rendered')).toBeNull();
+  });
+
+  it('renderMermaidElement で描画完了前に要素がDOMから切り離された場合は更新を破棄すること。', async () => {
+    const container = mockDoc.createElement('div');
+    container.className = 'mermaid-block';
+    container.setAttribute(
+      'data-mermaid-code',
+      'flowchart TD\n  Detached --> Test',
+    );
+    mockDoc.body.appendChild(container);
+
+    const renderPromise = renderMermaidElement(
+      container as unknown as HTMLElement,
+    );
+
+    // 描画処理中に親要素からデタッチされた状況をシミュレート
+    container.remove();
+
+    await renderPromise;
+
+    // デタッチされた要素に対するDOM更新は破棄され、data-mermaid-rendered="true" も付与されないこと
+    expect(container.getAttribute('data-mermaid-rendered')).toBeNull();
   });
 });
