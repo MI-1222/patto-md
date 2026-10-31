@@ -7,10 +7,10 @@ import {
   z,
 } from '@patto-md/shared';
 import { Hono } from 'hono';
-import { createPresignedPutUrl, generateR2Key } from '../lib/r2';
-import { createRateLimitMiddleware } from '../middlewares/rate-limit';
-import { createTurnstileMiddleware } from '../middlewares/turnstile';
-import type { AppEnv } from '../types';
+import { createPresignedPutUrl, generateR2Key } from '../lib/r2.ts';
+import { createRateLimitMiddleware } from '../middlewares/rate-limit.ts';
+import { createTurnstileMiddleware } from '../middlewares/turnstile.ts';
+import type { AppEnv } from '../types.ts';
 
 /** ファイルアップロード関連のサブルーター。 */
 export const uploadRouter = new Hono<AppEnv>();

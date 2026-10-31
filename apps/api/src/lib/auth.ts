@@ -137,17 +137,6 @@ export function createDocumentAuthMiddleware(
       );
     }
 
-    if (doc.status === 'suspended') {
-      return c.json(
-        {
-          error: {
-            message: '規約違反の通報により凍結されています。',
-          },
-        },
-        403,
-      );
-    }
-
     let matchedRole: CapabilityTokenType | null = null;
 
     if (token) {
@@ -195,6 +184,22 @@ export function createDocumentAuthMiddleware(
         },
         403,
       );
+    }
+
+    // 凍結ドキュメントに対するアクセス制御。
+    // 自主取り下げを可能にするため、特権 edit 保持者による DELETE 操作のみ許可し、PUT や renew 等は 403 で遮断する。
+    if (doc.status === 'suspended') {
+      const isDelete = c.req.method === 'DELETE';
+      if (!isDelete || matchedRole !== 'edit') {
+        return c.json(
+          {
+            error: {
+              message: '規約違反の通報により凍結されています。',
+            },
+          },
+          403,
+        );
+      }
     }
 
     c.set('authDoc', doc);

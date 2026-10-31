@@ -3,3 +3,4 @@
  */
 export * from './DocumentActionBar';
 export * from './PasscodeUnlockCard';
+export * from './ReportModal';

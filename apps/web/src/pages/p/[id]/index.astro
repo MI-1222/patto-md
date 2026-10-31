@@ -18,6 +18,7 @@ import { renderMarkdown, extractDescription } from '../../../lib/markdown';
 import {
   DocumentActionBar,
   PasscodeUnlockCard,
+  ReportModal,
 } from '../../../components/viewer';
 
 const { id } = Astro.params;
@@ -82,7 +83,12 @@ if (!isProtected && doc.content) {
 
 <BaseLayout title={pageTitle} description={description} image={ogImage}>
   {isProtected ? (
-    <PasscodeUnlockCard client:load documentId={doc.id} title={doc.title} />
+    <div>
+      <PasscodeUnlockCard client:load documentId={doc.id} title={doc.title} />
+      <div class="mt-4">
+        <ReportModal client:idle documentId={doc.id} />
+      </div>
+    </div>
   ) : (
     <div class="mx-auto max-w-4xl px-4 py-8 sm:px-6 sm:py-12">
       <div class="overflow-hidden rounded-xl border border-neutral-800 bg-neutral-900/40 shadow-2xl backdrop-blur-sm">
@@ -110,6 +116,10 @@ if (!isProtected && doc.content) {
             set:html={renderedHtml}
           />
         </div>
+
+        <footer class="border-t border-neutral-800/60 bg-neutral-950/20 px-6 py-4 sm:px-8">
+          <ReportModal client:idle documentId={doc.id} />
+        </footer>
       </div>
     </div>
   )}

@@ -1,6 +1,6 @@
 import { Hono } from 'hono';
-import { getR2AssetResponse, isValidR2Key } from '../lib/r2';
-import type { AppEnv } from '../types';
+import { getR2AssetResponse, isValidR2Key } from '../lib/r2.ts';
+import type { AppEnv } from '../types.ts';
 
 /** アセット配信用のサブルーター。 */
 export const assetsRouter = new Hono<AppEnv>();

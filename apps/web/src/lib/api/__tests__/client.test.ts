@@ -9,6 +9,7 @@ import {
   verifyPasscode,
   claimDocument,
   fetchCurrentUser,
+  reportDocument,
   logout,
   ApiError,
 } from '../client';
@@ -594,6 +595,83 @@ describe('APIクライアント(src/lib/api/client.ts)', () => {
 
       const user = await fetchCurrentUser('http://localhost:8787');
       expect(user).toBeNull();
+    });
+  });
+
+  describe('logout', () => {
+    it('正常時にログアウトAPIへPOSTリクエストを送信する。', async () => {
+      globalThis.fetch = vi.fn().mockResolvedValue({
+        ok: true,
+        status: 200,
+        json: async () => ({ success: true }),
+      } as unknown as Response);
+
+      const result = await logout('http://localhost:8787');
+      expect(result).toEqual({ success: true });
+      expect(globalThis.fetch).toHaveBeenCalledWith(
+        'http://localhost:8787/api/auth/logout',
+        { method: 'POST', credentials: 'include' },
+      );
+    });
+  });
+
+  describe('reportDocument', () => {
+    it('正常時に通報APIへPOSTリクエストを送信し、結果を取得する。', async () => {
+      const mockResponse = {
+        success: true,
+        message: '通報を受け付けました。',
+      };
+
+      globalThis.fetch = vi.fn().mockResolvedValue({
+        ok: true,
+        status: 200,
+        json: async () => mockResponse,
+      } as unknown as Response);
+
+      const result = await reportDocument(
+        'AbCdEf123456',
+        {
+          reason: 'phishing',
+          details: '不審なリンクが含まれています。',
+        },
+        'dummy-turnstile-token',
+        'http://localhost:8787',
+      );
+
+      expect(result).toEqual(mockResponse);
+      expect(globalThis.fetch).toHaveBeenCalledWith(
+        'http://localhost:8787/api/documents/AbCdEf123456/report',
+        {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'x-turnstile-token': 'dummy-turnstile-token',
+          },
+          body: JSON.stringify({
+            reason: 'phishing',
+            details: '不審なリンクが含まれています。',
+          }),
+        },
+      );
+    });
+
+    it('APIエラー時に適切なエラーメッセージを含む ApiError を投げる。', async () => {
+      globalThis.fetch = vi.fn().mockResolvedValue({
+        ok: false,
+        status: 400,
+        json: async () => ({
+          error: { message: '入力内容に誤りがあります。' },
+        }),
+      } as unknown as Response);
+
+      await expect(
+        reportDocument(
+          'AbCdEf123456',
+          { reason: 'spam' },
+          'dummy-token',
+          'http://localhost:8787',
+        ),
+      ).rejects.toThrow('入力内容に誤りがあります。');
     });
   });
 });

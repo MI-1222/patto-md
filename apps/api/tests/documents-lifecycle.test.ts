@@ -327,11 +327,11 @@ describe('ドキュメント更新・削除・再公開ライフサイクルAPI 
       assert.strictEqual(getDoc()?.status, 'published');
     });
 
-    test('凍結中 (suspended) のドキュメントは 403 で遮断すること。', async () => {
+    test('凍結中 (suspended) のドキュメントであっても、特権 editToken 保持者は自主取り下げ (DELETE) が可能であること。', async () => {
       const { doc, editToken } = await createFixtureDoc({
         status: 'suspended',
       });
-      const { app } = buildTestApp(doc);
+      const { app, getDoc } = buildTestApp(doc);
 
       const res = await app.request(
         `http://localhost/api/documents/${dummySlug}`,
@@ -343,7 +343,8 @@ describe('ドキュメント更新・削除・再公開ライフサイクルAPI 
         },
       );
 
-      assert.strictEqual(res.status, 403);
+      assert.strictEqual(res.status, 200);
+      assert.strictEqual(getDoc()?.status, 'deleted');
     });
   });
 

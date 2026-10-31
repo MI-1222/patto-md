@@ -10,6 +10,10 @@
     "db:migrate:local": "wrangler d1 migrations apply DB --local",
     "db:migrate:remote": "wrangler d1 migrations apply DB --remote",
     "db:expire:local": "node --experimental-strip-types scripts/expire-document.ts",
+    "db:suspend:local": "node --experimental-strip-types scripts/suspend-document.ts",
+    "db:suspend:remote": "node --experimental-strip-types scripts/suspend-document.ts --remote",
+    "db:unsuspend:local": "node --experimental-strip-types scripts/unsuspend-document.ts",
+    "db:unsuspend:remote": "node --experimental-strip-types scripts/unsuspend-document.ts --remote",
     "cf-typegen": "wrangler types",
     "typecheck": "tsc --noEmit",
     "test": "node --test --experimental-strip-types 'tests/**/*.test.ts'"

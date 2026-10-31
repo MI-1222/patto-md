@@ -5,6 +5,8 @@ import {
   type DocumentCommitRequest,
   type DocumentCommitResponse,
   type DocumentListResponse,
+  type DocumentReportRequest,
+  type DocumentReportResponse,
   type DocumentResponse,
   type DocumentUpdateRequest,
   type DocumentUpdateResponse,
@@ -652,4 +654,57 @@ export async function logout(
   }
 
   return (await response.json()) as { success: boolean };
+}
+
+/**
+ * ドキュメント通報API (`POST /api/documents/:id/report`) を呼び出す。
+ *
+ * @param id - 通報対象のドキュメントID (`Slug`)。
+ * @param payload - 通報内容 (理由、補足詳細)。
+ * @param turnstileToken - Turnstile検証トークン。
+ * @param baseUrl - 接続先APIのベースURL。
+ * @returns 通報受付レスポンス。
+ */
+export async function reportDocument(
+  id: string,
+  payload: DocumentReportRequest,
+  turnstileToken: string,
+  baseUrl: string = getApiBaseUrl(),
+): Promise<DocumentReportResponse> {
+  const url = `${baseUrl}/api/documents/${encodeURIComponent(id)}/report`;
+
+  const headers: Record<string, string> = {
+    'Content-Type': 'application/json',
+    [TURNSTILE_TOKEN_HEADER]: turnstileToken,
+  };
+
+  let response: Response;
+  try {
+    response = await fetch(url, {
+      method: 'POST',
+      headers,
+      body: JSON.stringify(payload),
+    });
+  } catch (error) {
+    const detail = error instanceof Error ? error.message : String(error);
+    throw new ApiError(`通報APIへの接続に失敗しました: ${detail}`, 0);
+  }
+
+  if (!response.ok) {
+    let errorMessage = '通報の送信に失敗しました。';
+    try {
+      const errorJson = (await response.json()) as {
+        error?: { message?: string; details?: unknown };
+      };
+      if (errorJson.error?.message) {
+        errorMessage = errorJson.error.message;
+      }
+    } catch {
+      // JSONパース失敗時はデフォルトエラーメッセージを使用する。
+    }
+
+    throw new ApiError(errorMessage, response.status);
+  }
+
+  return (await response.json()) as DocumentReportResponse;
 }

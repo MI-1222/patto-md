@@ -1,8 +1,8 @@
 import {
-  AUTH_SESSION_COOKIE_NAME,
   documentClaimRequestSchema,
   documentCommitRequestSchema,
   documentRenewRequestSchema,
+  documentReportRequestSchema,
   documentUpdateRequestSchema,
   documentVerifyPasscodeRequestSchema,
   generateCapabilityToken,
@@ -15,6 +15,8 @@ import {
   RATE_LIMIT_DOCUMENT_DELETE_WINDOW_SECONDS,
   RATE_LIMIT_DOCUMENT_RENEW_LIMIT,
   RATE_LIMIT_DOCUMENT_RENEW_WINDOW_SECONDS,
+  RATE_LIMIT_DOCUMENT_REPORT_LIMIT,
+  RATE_LIMIT_DOCUMENT_REPORT_WINDOW_SECONDS,
   RATE_LIMIT_DOCUMENT_UPDATE_LIMIT,
   RATE_LIMIT_DOCUMENT_UPDATE_WINDOW_SECONDS,
   RATE_LIMIT_VERIFY_PASSCODE_LIMIT,
@@ -28,6 +30,7 @@ import {
   type DocumentListResponse,
   type DocumentRecord,
   type DocumentRenewResponse,
+  type DocumentReportResponse,
   type DocumentResponse,
   type DocumentUpdateResponse,
   type DocumentVerifyPasscodeResponse,
@@ -35,12 +38,15 @@ import {
   SLUG_PATTERN,
   z,
 } from '@patto-md/shared';
+
 import { Hono } from 'hono';
 import { extractBearerToken } from '../lib/auth.ts';
 import { calculateDocumentCacheControl } from '../lib/cache.ts';
 import { calculateExpiresAt } from '../lib/date.ts';
 import { hashPasscode, verifyPasscode } from '../lib/passcode.ts';
 import { checkR2ObjectExists, getR2Text, isValidR2Key } from '../lib/r2.ts';
+import { getClientIp } from '../lib/rate-limit.ts';
+import { hashClientIp } from '../lib/ip-hash.ts';
 import { generateSlug } from '../lib/slug.ts';
 import {
   buildPasscodeSetCookieHeader,
@@ -52,7 +58,8 @@ import {
 import { createDocumentAuthMiddleware } from '../middlewares/auth.ts';
 import { createRateLimitMiddleware } from '../middlewares/rate-limit.ts';
 import { resolveSessionUser } from '../middlewares/session.ts';
-import type { AppEnv } from '../types';
+import { createTurnstileMiddleware } from '../middlewares/turnstile.ts';
+import type { AppEnv } from '../types.ts';
 
 /** ドキュメント管理関連のサブルーター。 */
 export const documentsRouter = new Hono<AppEnv>();
@@ -1545,6 +1552,160 @@ documentsRouter.post(
       ownerUserId: currentUser.providerUserId,
       ownerProvider: currentUser.provider,
       updatedAt: nowIso,
+    };
+    return c.json(responsePayload, 200);
+  },
+);
+
+/**
+ * ドキュメント通報受付エンドポイント。
+ *
+ * 閲覧者からのスパム・規約違反等の通報を受け付け、D1 `abuse_reports` テーブルに記録する。
+ * ボットによるスクリプト通報を防ぐため Turnstile 検証を必須とし、
+ * エッジレートリミット(1分間3回)およびIPアドレスのソルト付き不可逆ハッシュ化により
+ * プライバシー保護とDoS攻撃耐性を両立する。
+ * 同一IPからの多重通報は水増しを防ぐため再登録せず冪等に受付完了を返却する。
+ */
+documentsRouter.post(
+  '/:id/report',
+  createRateLimitMiddleware({
+    limit: RATE_LIMIT_DOCUMENT_REPORT_LIMIT,
+    windowSeconds: RATE_LIMIT_DOCUMENT_REPORT_WINDOW_SECONDS,
+    action: 'document-report',
+  }),
+  createTurnstileMiddleware({ required: true }),
+  async (c) => {
+    const id = c.req.param('id');
+
+    // Slug形式の事前検証。
+    if (!id || !SLUG_PATTERN.test(id)) {
+      c.header('Cache-Control', 'no-store');
+      return c.json(
+        {
+          error: {
+            message: 'ドキュメントが見つかりません。',
+          },
+        },
+        404,
+      );
+    }
+
+    // リクエストボディのパース。
+    let rawBody: unknown;
+    try {
+      rawBody = await c.req.json();
+    } catch {
+      c.header('Cache-Control', 'no-store');
+      return c.json(
+        {
+          error: {
+            message: 'リクエストボディが不正なJSON形式です。',
+          },
+        },
+        400,
+      );
+    }
+
+    // Zodスキーマによる入力検証。
+    const parseResult = documentReportRequestSchema.safeParse(rawBody);
+    if (!parseResult.success) {
+      c.header('Cache-Control', 'no-store');
+      return c.json(
+        {
+          error: {
+            message: '入力内容に誤りがあります。',
+            details: parseResult.error.flatten(),
+          },
+        },
+        400,
+      );
+    }
+
+    const { reason, details } = parseResult.data;
+
+    // 対象ドキュメントの存在確認。
+    let doc: { id: string; status: string } | null = null;
+    try {
+      doc = await c.env.DB.prepare(
+        `SELECT id, status FROM documents WHERE id = ? LIMIT 1`,
+      )
+        .bind(id)
+        .first<{ id: string; status: string }>();
+    } catch (error) {
+      console.error('D1ドキュメント存在確認クエリエラー:', error);
+      c.header('Cache-Control', 'no-store');
+      return c.json(
+        {
+          error: {
+            message: 'データベースの参照に失敗しました。',
+          },
+        },
+        500,
+      );
+    }
+
+    if (!doc || doc.status === 'deleted') {
+      c.header('Cache-Control', 'no-store');
+      return c.json(
+        {
+          error: {
+            message: 'ドキュメントが見つかりません。',
+          },
+        },
+        404,
+      );
+    }
+
+    // 既に凍結済みの場合は不要な書き込みを避け、200 OKを返却する。
+    if (doc.status === 'suspended') {
+      c.header('Cache-Control', 'no-store');
+      const responsePayload: DocumentReportResponse = {
+        success: true,
+        message: '通報を受け付けました。',
+      };
+      return c.json(responsePayload, 200);
+    }
+
+    // クライアントIPのペッパー付きSHA-256ハッシュ化。
+    const clientIp = getClientIp(c);
+    const jwtSecret = resolveJwtSecret(c.env);
+    const reporterIpHash = await hashClientIp(clientIp, jwtSecret);
+
+    // 通報レコードの登録(複合ユニーク制約により同一IPの重複通報は INSERT OR IGNORE で自動スキップ)。
+    try {
+      const reasonText =
+        details && details.trim().length > 0
+          ? `${reason}: ${details.trim()}`
+          : reason;
+      const nowIso = new Date().toISOString();
+
+      await c.env.DB.prepare(
+        `INSERT OR IGNORE INTO abuse_reports (
+          document_id,
+          reporter_ip_hash,
+          reason,
+          created_at
+        ) VALUES (?, ?, ?, ?)`,
+      )
+        .bind(id, reporterIpHash, reasonText, nowIso)
+        .run();
+    } catch (error) {
+      console.error('D1通報登録エラー:', error);
+      c.header('Cache-Control', 'no-store');
+      return c.json(
+        {
+          error: {
+            message: '通報の処理に失敗しました。',
+          },
+        },
+        500,
+      );
+    }
+
+    c.header('Cache-Control', 'no-store');
+    const responsePayload: DocumentReportResponse = {
+      success: true,
+      message: '通報を受け付けました。',
     };
     return c.json(responsePayload, 200);
   },

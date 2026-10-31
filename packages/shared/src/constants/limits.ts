@@ -161,3 +161,33 @@ export const RATE_LIMIT_AUTH_CALLBACK_LIMIT = 10;
 
 /** OAuthコールバック受信APIのレートリミットウィンドウ秒数(1分)。 */
 export const RATE_LIMIT_AUTH_CALLBACK_WINDOW_SECONDS = 60;
+
+/** 通報理由の選択肢リスト。 */
+export const ABUSE_REPORT_REASONS = [
+  'spam',
+  'phishing',
+  'malware',
+  'illegal',
+  'other',
+] as const;
+
+/** 通報理由種別の型。 */
+export type AbuseReportReason = (typeof ABUSE_REPORT_REASONS)[number];
+
+/** 通報理由の表示用ラベルマッピング。 */
+export const ABUSE_REPORT_REASON_LABELS: Record<AbuseReportReason, string> = {
+  spam: 'スパム・広告目的の投稿',
+  phishing: 'フィッシング・詐欺サイトへの誘導',
+  malware: 'マルウェア・悪意あるスクリプトの配布',
+  illegal: '違法コンテンツ・著作権侵害',
+  other: 'その他（利用規約違反）',
+};
+
+/** 通報詳細テキストの最大文字数。 */
+export const MAX_ABUSE_REPORT_DETAILS_LENGTH = 500;
+
+/** 通報APIのレートリミット上限(1分あたりの最大リクエスト数)。 */
+export const RATE_LIMIT_DOCUMENT_REPORT_LIMIT = 3;
+
+/** 通報APIのレートリミットウィンドウ秒数(1分)。 */
+export const RATE_LIMIT_DOCUMENT_REPORT_WINDOW_SECONDS = 60;
