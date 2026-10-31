@@ -8,7 +8,7 @@ import {
   type PublishProgressInfo,
 } from '../../lib/api/publish';
 import { ApiError } from '../../lib/api/client';
-import { addMyDocumentId } from '../../lib/storage/myDocuments';
+import { addMyDocumentId, saveDocumentTokens } from '../../lib/storage';
 import type {
   MarkdownParseResult,
   ReconciliationResult,
@@ -107,6 +107,15 @@ export function useDocumentPublish(): UseDocumentPublishReturn {
     setPublishedUrl(null);
   }, []);
 
+  /**
+   * ドキュメントの公開処理を実行する。
+   *
+   * R2への直接アップロードとD1コミットの完了後、発行された `editToken` と `modifyToken` を
+   * `localStorage` へ退避し、管理用URLフラグメント付きパーマリンクへ遷移する。
+   *
+   * @param params - 公開処理パラメータ。
+   * @returns コミット結果レスポンス。失敗時は `null`。
+   */
   const publish = useCallback(
     async (params: PublishParams): Promise<DocumentCommitResponse | null> => {
       const { onSuccess } = params;
@@ -126,19 +135,24 @@ export function useDocumentPublish(): UseDocumentPublishReturn {
           },
         });
 
-        // 公開成功確定後は離脱防止アラートを即座に解除する。
         isPublishingRef.current = false;
         setStatus('completed');
         setProgressPercent(100);
         setProgressMessage('ドキュメントの公開に成功。');
-        setPublishedUrl(commitResponse.url);
 
+        saveDocumentTokens(commitResponse.id, {
+          editToken: commitResponse.editToken,
+          modifyToken: commitResponse.modifyToken,
+        });
         addMyDocumentId(commitResponse.id);
+
+        const adminUrl = `${commitResponse.url}#edit_token=${commitResponse.editToken}`;
+        setPublishedUrl(adminUrl);
 
         if (onSuccess) {
           onSuccess(commitResponse);
         } else if (typeof window !== 'undefined') {
-          window.location.href = commitResponse.url;
+          window.location.href = adminUrl;
         }
 
         return commitResponse;
