@@ -31,3 +31,32 @@ R2_BUCKET_NAME="patto-md-r2"
 # CORS (Cross-Origin Resource Sharing) で許可する Web アプリケーションのオリジン URL。
 # ローカル開発時は Astro の開発サーバー (http://localhost:4321) を指定する。
 FRONTEND_ORIGIN="http://localhost:4321"
+
+# Cloudflare Turnstile シークレットキー:
+# ボット防御用の Turnstile Siteverify API (https://challenges.cloudflare.com/turnstile/v0/siteverify)
+# でトークンを検証するためのシークレットキー。
+# ローカル開発・テスト時は Cloudflare 公式の Always Pass ダミーキーを使用する。
+TURNSTILE_SECRET_KEY="1x0000000000000000000000000000000AA"
+
+# GitHub OAuth2 設定:
+# GitHub Developer Settings (https://github.com/settings/developers) で作成した OAuth App の情報。
+# Authorization callback URL: http://localhost:8787/api/auth/github/callback (ローカル開発時)
+GITHUB_CLIENT_ID="your-github-client-id"
+GITHUB_CLIENT_SECRET="your-github-client-secret"
+
+# Discord OAuth2 設定:
+# Discord Developer Portal (https://discord.com/developers/applications) で作成した OAuth2 アプリの情報。
+# Redirects: http://localhost:8787/api/auth/discord/callback (ローカル開発時)
+DISCORD_CLIENT_ID="your-discord-client-id"
+DISCORD_CLIENT_SECRET="your-discord-client-secret"
+
+# OAuth コールバック用ベースURL:
+# 未指定時はリクエストURLのオリジンが自動採用される。
+# 本番環境でカスタムドメイン等へ固定したい場合に指定する。
+AUTH_REDIRECT_BASE_URL="http://localhost:8787"
+
+# JWT 署名シークレットキー:
+# ユーザーセッション (OAuth2) やパスコード閲覧トークン (JWT) の署名・検証に使用する。
+# `openssl rand -base64 32` などで生成した十分な長さ (32文字以上推奨) のランダム文字列を指定する。
+# 未指定時は R2_SECRET_ACCESS_KEY または開発用のデフォルト値が自動適用される。
+JWT_SECRET="your-jwt-secret-key-at-least-32-chars"

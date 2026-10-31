@@ -9,9 +9,25 @@ import tailwindcss from '@tailwindcss/vite';
  */
 export default defineConfig({
   output: 'server',
-  adapter: cloudflare(),
+  adapter: cloudflare({
+    imageService: 'compile',
+  }),
   integrations: [react()],
   vite: {
     plugins: [tailwindcss()],
+    build: {
+      rollupOptions: {
+        onwarn(warning, warn) {
+          // Zodパッケージ内のアノテーション位置起因によるRollup警告を抑制する。
+          if (
+            warning.code === 'INVALID_ANNOTATION' &&
+            warning.id?.includes('zod')
+          ) {
+            return;
+          }
+          warn(warning);
+        },
+      },
+    },
   },
 });

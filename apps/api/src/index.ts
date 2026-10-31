@@ -1,10 +1,11 @@
-import { SHARED_MODULE_NAME } from '@patto-md/shared';
+import { SHARED_MODULE_NAME, TURNSTILE_TOKEN_HEADER } from '@patto-md/shared';
 import { Hono } from 'hono';
 import { cors } from 'hono/cors';
 import { logger } from 'hono/logger';
 import { documentsRouter } from './routes/documents';
 import { uploadRouter } from './routes/upload';
 import { assetsRouter } from './routes/assets';
+import { authRouter } from './routes/auth';
 import { resolveAllowedOrigin } from './lib/cors';
 import type { AppEnv } from './types';
 
@@ -23,7 +24,23 @@ app.use(
   cors({
     origin: (origin, c) => resolveAllowedOrigin(origin, c.env.FRONTEND_ORIGIN),
     allowMethods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
-    allowHeaders: ['Content-Type', 'Authorization'],
+    credentials: true,
+    allowHeaders: [
+      'Content-Type',
+      'Authorization',
+      TURNSTILE_TOKEN_HEADER,
+      'X-Turnstile-Token',
+      'cf-turnstile-response',
+    ],
+    exposeHeaders: [
+      'Retry-After',
+      'RateLimit-Limit',
+      'RateLimit-Remaining',
+      'RateLimit-Reset',
+      'X-RateLimit-Limit',
+      'X-RateLimit-Remaining',
+      'X-RateLimit-Reset',
+    ],
     maxAge: 86400,
   }),
 );
@@ -77,5 +94,8 @@ app.route('/api/documents', documentsRouter);
 
 /** アセット配信関連APIサブルーターのマウント。 */
 app.route('/api/assets', assetsRouter);
+
+/** OAuth認証関連APIサブルーターのマウント。 */
+app.route('/api/auth', authRouter);
 
 export default app;

@@ -5,10 +5,20 @@ import React, {
   useMemo,
   useTransition,
 } from 'react';
-import type { DocumentListItem, DocumentListResponse } from '@patto-md/shared';
-import { fetchDocuments } from '../../lib/api';
+import type {
+  AuthUser,
+  DocumentListItem,
+  DocumentListResponse,
+} from '@patto-md/shared';
+import {
+  claimDocument,
+  fetchCurrentUser,
+  fetchDocuments,
+  getApiBaseUrl,
+} from '../../lib/api';
 import { getMyDocumentIds } from '../../lib/storage/myDocuments';
-import { SearchIcon } from '../svg/ActionIcons';
+import { getDocumentTokens } from '../../lib/storage/tokens';
+import { SearchIcon, UserCheckIcon } from '../svg/ActionIcons';
 import { DocumentCard } from './DocumentCard';
 
 /** タブ種別の定義。 */
@@ -67,45 +77,114 @@ export const DocumentListContainer: React.FC<DocumentListContainerProps> = ({
   const [isLoading, setIsLoading] = useState<boolean>(false);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
 
+  const [currentUser, setCurrentUser] = useState<AuthUser | null>(null);
   const [allData, setAllData] = useState<DocumentListResponse>(initialData);
   const [mineData, setMineData] = useState<DocumentListResponse | null>(null);
+  const [unclaimedDocs, setUnclaimedDocs] = useState<DocumentListItem[]>([]);
+  const [isClaimingAll, setIsClaimingAll] = useState<boolean>(false);
+  const [claimNotice, setClaimNotice] = useState<{
+    type: 'success' | 'error';
+    message: string;
+  } | null>(null);
 
   const [, startTransition] = useTransition();
 
   /**
-   * ドキュメント一覧データをAPIから取得する。
+   * ドキュメント一覧データを API から取得する。
+   *
+   * 選択中のタブ種別に応じて以下の通りデータを取得・反映する。
+   * - `all`: 全体公開ドキュメントをページ単位で取得する。
+   * - `mine` (ログイン時): アカウント所有ドキュメントをページ単位で取得し、同時にローカルストレージ内の未統合ドキュメントを検出する。
+   * - `mine` (未ログイン時): ローカルストレージに保持されたドキュメント ID 群から一覧を取得する。
    *
    * @param tab - 表示対象のタブ種別。
    * @param page - 取得対象のページ番号。
-   * @param targetIds - 絞り込み対象のドキュメントID群。
+   * @param targetIds - 絞り込み対象のドキュメント ID 群。
+   * @param user - ログイン中ユーザー情報(任意)。
    */
   const loadDocuments = useCallback(
-    async (tab: DocumentTab, page: number, targetIds: string[]) => {
+    async (
+      tab: DocumentTab,
+      page: number,
+      targetIds: string[],
+      user?: AuthUser | null,
+    ) => {
       setIsLoading(true);
       setErrorMessage(null);
 
       try {
         if (tab === 'mine') {
-          if (targetIds.length === 0) {
-            setMineData({
-              items: [],
-              total: 0,
-              page: 1,
-              limit: 12,
-              totalPages: 0,
-            });
-            setIsLoading(false);
-            return;
+          const activeUser =
+            user !== undefined ? user : await fetchCurrentUser();
+          if (user === undefined) {
+            setCurrentUser(activeUser);
           }
 
-          const result = await fetchDocuments({
-            page,
-            limit: 12,
-            ids: targetIds,
-            baseUrl: apiBaseUrl,
-          });
-          setMineData(result.data);
+          if (activeUser) {
+            const mineResult = await fetchDocuments({
+              page,
+              limit: 12,
+              mine: true,
+              baseUrl: apiBaseUrl,
+            });
+            setMineData(mineResult.data);
+
+            if (targetIds.length > 0) {
+              try {
+                const allMineResult = await fetchDocuments({
+                  page: 1,
+                  limit: 100,
+                  mine: true,
+                  baseUrl: apiBaseUrl,
+                });
+                const ownedIdSet = new Set(
+                  allMineResult.data.items.map((item) => item.id),
+                );
+                const unclaimedIds = targetIds.filter(
+                  (id) => !ownedIdSet.has(id),
+                );
+
+                if (unclaimedIds.length > 0) {
+                  const localResult = await fetchDocuments({
+                    page: 1,
+                    limit: 50,
+                    ids: unclaimedIds,
+                    baseUrl: apiBaseUrl,
+                  });
+                  setUnclaimedDocs(localResult.data.items);
+                } else {
+                  setUnclaimedDocs([]);
+                }
+              } catch {
+                setUnclaimedDocs([]);
+              }
+            } else {
+              setUnclaimedDocs([]);
+            }
+          } else {
+            setUnclaimedDocs([]);
+            if (targetIds.length === 0) {
+              setMineData({
+                items: [],
+                total: 0,
+                page: 1,
+                limit: 12,
+                totalPages: 0,
+              });
+              setIsLoading(false);
+              return;
+            }
+
+            const result = await fetchDocuments({
+              page,
+              limit: 12,
+              ids: targetIds,
+              baseUrl: apiBaseUrl,
+            });
+            setMineData(result.data);
+          }
         } else {
+          setUnclaimedDocs([]);
           const result = await fetchDocuments({
             page,
             limit: 12,
@@ -127,8 +206,59 @@ export const DocumentListContainer: React.FC<DocumentListContainerProps> = ({
     [apiBaseUrl],
   );
 
-  // 初回マウント時にローカルストレージおよびURLパラメータから初期状態を反映
+  /** ローカルストレージ内の未保存ドキュメントをログイン中のアカウントに一括統合する。 */
+  const handleBatchClaim = async () => {
+    if (!currentUser || unclaimedDocs.length === 0 || isClaimingAll) {
+      return;
+    }
+
+    setIsClaimingAll(true);
+    setClaimNotice(null);
+
+    let successCount = 0;
+    let failCount = 0;
+
+    for (const doc of unclaimedDocs) {
+      const tokens = getDocumentTokens(doc.id);
+      const editToken = tokens?.editToken;
+      if (!editToken) {
+        failCount += 1;
+        continue;
+      }
+
+      try {
+        await claimDocument(doc.id, editToken, apiBaseUrl);
+        successCount += 1;
+      } catch (err) {
+        console.error(`ドキュメント ${doc.id} の統合に失敗。`, err);
+        failCount += 1;
+      }
+    }
+
+    setIsClaimingAll(false);
+
+    if (successCount > 0) {
+      setClaimNotice({
+        type: 'success',
+        message: `${successCount}件のドキュメントをアカウントに保存しました。${
+          failCount > 0 ? `(${failCount}件は保存に失敗)` : ''
+        }`,
+      });
+      loadDocuments(activeTab, currentPage, myDocumentIds, currentUser);
+    } else {
+      setClaimNotice({
+        type: 'error',
+        message: 'ドキュメントのアカウント保存に失敗しました。',
+      });
+    }
+  };
+
+  // 初回マウント時にローカルストレージ、ログイン状態、およびURLパラメータから初期状態を反映
   useEffect(() => {
+    fetchCurrentUser().then((user) => {
+      setCurrentUser(user);
+    });
+
     const ids = getMyDocumentIds();
     setMyDocumentIds(ids);
 
@@ -318,6 +448,81 @@ export const DocumentListContainer: React.FC<DocumentListContainerProps> = ({
         </div>
       )}
 
+      {claimNotice && (
+        <div
+          className={`flex items-center justify-between rounded-xl border p-4 text-xs ${
+            claimNotice.type === 'success'
+              ? 'border-emerald-500/30 bg-emerald-500/10 text-emerald-300'
+              : 'border-red-500/30 bg-red-500/10 text-red-300'
+          }`}
+        >
+          <span>{claimNotice.message}</span>
+          <button
+            type="button"
+            onClick={() => setClaimNotice(null)}
+            className="text-neutral-400 transition-colors hover:text-neutral-200"
+          >
+            ✕
+          </button>
+        </div>
+      )}
+
+      {activeTab === 'mine' && currentUser && unclaimedDocs.length > 0 && (
+        <div className="rounded-xl border border-blue-500/30 bg-blue-500/10 p-4 sm:p-5">
+          <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
+            <div className="flex items-start gap-3">
+              <div className="mt-0.5 rounded-lg bg-blue-500/20 p-2 text-blue-400">
+                <UserCheckIcon className="size-5" />
+              </div>
+              <div className="space-y-1">
+                <h2 className="text-sm font-semibold text-neutral-100">
+                  この端末で作成された未保存のドキュメント（
+                  {unclaimedDocs.length}件）
+                </h2>
+                <p className="text-xs text-neutral-400">
+                  このブラウザに保存されている投稿履歴をログイン中のアカウントに統合すると、他端末からも管理できるようになります。
+                </p>
+                <div className="flex flex-wrap gap-2 pt-1">
+                  {unclaimedDocs.slice(0, 5).map((doc) => (
+                    <a
+                      key={doc.id}
+                      href={`/p/${doc.id}`}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="inline-flex items-center gap-1 rounded bg-neutral-900/60 px-2 py-0.5 text-[11px] text-neutral-300 transition-colors hover:bg-neutral-800 hover:text-white"
+                      title={doc.title}
+                    >
+                      <span className="max-w-30 truncate">{doc.title}</span>
+                    </a>
+                  ))}
+                  {unclaimedDocs.length > 5 && (
+                    <span className="self-center text-[11px] text-neutral-500">
+                      他 {unclaimedDocs.length - 5} 件
+                    </span>
+                  )}
+                </div>
+              </div>
+            </div>
+
+            <button
+              type="button"
+              onClick={handleBatchClaim}
+              disabled={isClaimingAll}
+              className="inline-flex shrink-0 items-center justify-center gap-2 rounded-lg bg-blue-600 px-4 py-2 text-xs font-semibold text-white shadow-sm transition-colors hover:bg-blue-500 focus:ring-2 focus:ring-blue-400 focus:outline-none disabled:opacity-50"
+            >
+              {isClaimingAll ? (
+                <>
+                  <span className="size-3 animate-spin rounded-full border-2 border-white border-t-transparent" />
+                  <span>アカウントに統合中...</span>
+                </>
+              ) : (
+                <span>すべてアカウントに保存</span>
+              )}
+            </button>
+          </div>
+        </div>
+      )}
+
       {isLoading ? (
         <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 sm:gap-6 lg:grid-cols-3">
           {Array.from({ length: 6 }).map((_, index) => (
@@ -356,10 +561,37 @@ export const DocumentListContainer: React.FC<DocumentListContainerProps> = ({
               : 'Markdownファイルをドロップして最初のドキュメントを公開できます。'}
           </p>
           {activeTab === 'mine' && (
-            <p className="mt-1 text-xs text-neutral-500">
-              ※
-              投稿履歴はこのブラウザのローカルストレージに保存されます。端末やブラウザを変更すると表示されません。
-            </p>
+            <>
+              <p className="mt-1 text-xs text-neutral-500">
+                {currentUser
+                  ? 'アカウントに保存されたドキュメントおよびこのブラウザで作成されたドキュメントが表示されます。'
+                  : '※ 投稿履歴はこのブラウザのローカルストレージに保存されます。端末やブラウザを変更すると表示されません。'}
+              </p>
+              {!currentUser && (
+                <div className="mt-4 flex items-center gap-3">
+                  <a
+                    href={`${getApiBaseUrl()}/api/auth/github?return_to=${encodeURIComponent(
+                      typeof window !== 'undefined'
+                        ? window.location.pathname + window.location.search
+                        : '',
+                    )}`}
+                    className="inline-flex items-center gap-1.5 rounded-lg border border-neutral-700 bg-neutral-800/80 px-3.5 py-2 text-xs font-medium text-neutral-200 transition-colors hover:bg-neutral-700"
+                  >
+                    <span>GitHubでログイン</span>
+                  </a>
+                  <a
+                    href={`${getApiBaseUrl()}/api/auth/discord?return_to=${encodeURIComponent(
+                      typeof window !== 'undefined'
+                        ? window.location.pathname + window.location.search
+                        : '',
+                    )}`}
+                    className="inline-flex items-center gap-1.5 rounded-lg bg-[#5865F2]/20 px-3.5 py-2 text-xs font-medium text-[#5865F2] transition-colors hover:bg-[#5865F2]/30"
+                  >
+                    <span>Discordでログイン</span>
+                  </a>
+                </div>
+              )}
+            </>
           )}
           <a
             href="/"

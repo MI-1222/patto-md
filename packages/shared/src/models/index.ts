@@ -2,4 +2,4 @@
  * データベースモデルのエクスポート集約。
  */
 
-export * from './document';
+export * from './document.ts';

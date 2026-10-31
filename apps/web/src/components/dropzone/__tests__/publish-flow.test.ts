@@ -127,6 +127,8 @@ describe('Direct Uploadとコミットパイプラインの統合フロー検証
             id: 'testSlug123',
             url: '/p/testSlug123',
             title: commitBody.title,
+            editToken: 'pt_edt_0123456789abcdef0123456789abcdef0123456789a',
+            modifyToken: 'pt_mod_0123456789abcdef0123456789abcdef0123456789a',
             expiresAt: '2026-11-05T00:00:00.000Z',
             createdAt: '2026-10-29T00:00:00.000Z',
           };
@@ -527,6 +529,97 @@ describe('Direct Uploadとコミットパイプラインの統合フロー検証
 
       expect(result).not.toBeNull();
       expect(result.id).toBe('svgDocSlug');
+    });
+
+    it('Turnstile トークンが指定された場合、パイプラインの署名発行リクエストヘッダーへ正しく伝搬されること。', async () => {
+      const mdContent = '# トークン検証ドキュメント\n本文テキスト。';
+      const markdownVirtualFile: VirtualFile = {
+        file: new File([mdContent], 'doc.md', { type: 'text/markdown' }),
+        relativePath: 'doc.md',
+        isSizeExceeded: false,
+        isTypeUnsupported: false,
+      };
+
+      const parsedFiles: ParsedFiles = {
+        markdownFile: markdownVirtualFile,
+        assetFiles: new Map(),
+        totalSize: markdownVirtualFile.file.size,
+        isTotalSizeExceeded: false,
+        hasInvalidFiles: false,
+      };
+
+      const parseResult = await parseMarkdown(mdContent, {
+        basePath: 'doc.md',
+        fallbackTitle: 'doc',
+      });
+      const reconciliation = reconcileAssets(
+        parseResult.imageRefs,
+        parsedFiles.assetFiles,
+      );
+
+      let capturedSignHeaders: HeadersInit | undefined;
+
+      globalThis.fetch = vi
+        .fn()
+        .mockImplementation(
+          async (input: RequestInfo | URL, init?: RequestInit) => {
+            const url = String(input);
+
+            if (url.includes('/api/upload/sign')) {
+              capturedSignHeaders = init?.headers;
+              return {
+                ok: true,
+                status: 200,
+                json: async () => ({
+                  files: [
+                    {
+                      fileId: 'mock-file-1',
+                      fileName: 'doc.md',
+                      r2Key: 'temp/uploads/mock-file-1/doc.md',
+                      uploadUrl: 'https://r2.example.com/put-doc',
+                    },
+                  ],
+                }),
+              } as Response;
+            }
+
+            if (url.startsWith('https://r2.example.com/put-')) {
+              return { ok: true, status: 200 } as Response;
+            }
+
+            if (url.includes('/api/documents')) {
+              return {
+                ok: true,
+                status: 201,
+                json: async () => ({
+                  id: 'tokenDocSlug',
+                  url: '/p/tokenDocSlug',
+                  title: 'トークン検証ドキュメント',
+                  expiresAt: null,
+                  createdAt: '2026-10-30T00:00:00.000Z',
+                }),
+              } as Response;
+            }
+
+            return { ok: false, status: 404 } as Response;
+          },
+        );
+
+      const result = await executePublishPipeline({
+        parsedFiles,
+        reconciliation,
+        parseResult,
+        markdownContent: mdContent,
+        expiration: 'never',
+        turnstileToken: 'test-turnstile-token-value',
+        baseUrl: 'http://localhost:8787',
+      });
+
+      expect(result.id).toBe('tokenDocSlug');
+      expect(capturedSignHeaders).toBeDefined();
+      expect(
+        (capturedSignHeaders as Record<string, string>)['x-turnstile-token'],
+      ).toBe('test-turnstile-token-value');
     });
   });
 });

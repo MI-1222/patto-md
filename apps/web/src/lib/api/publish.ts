@@ -1,6 +1,7 @@
 import type {
   DocumentAttachmentCommit,
   DocumentCommitResponse,
+  DocumentVisibility,
   ExpirationPreset,
   UploadSignFileItem,
   UploadSignFileResponseItem,
@@ -46,8 +47,14 @@ export interface ExecutePublishPipelineParams {
   markdownContent: string;
   /** 選択された有効期限プリセット。 */
   expiration: ExpirationPreset;
+  /** ドキュメント公開範囲。 */
+  visibility?: DocumentVisibility;
+  /** パスコード保護時の平文パスコード。 */
+  passcode?: string;
   /** 未解決画像のリンク切れ公開を容認するかどうかの真偽値。 */
   allowIncompletePublish?: boolean;
+  /** Cloudflare Turnstile ボット検証トークン。 */
+  turnstileToken?: string;
   /** 接続先APIベースURL。 */
   baseUrl?: string;
   /** 進捗コールバックハンドラー。 */
@@ -112,7 +119,10 @@ export async function executePublishPipeline(
     parseResult,
     markdownContent,
     expiration,
+    visibility = 'public',
+    passcode,
     allowIncompletePublish = false,
+    turnstileToken,
     baseUrl,
     onProgress,
   } = params;
@@ -170,7 +180,11 @@ export async function executePublishPipeline(
     },
   ];
 
-  const signResponse = await requestUploadSign(fileSignItems, baseUrl);
+  const signResponse = await requestUploadSign(
+    fileSignItems,
+    baseUrl,
+    turnstileToken,
+  );
   const signedFiles = signResponse.files;
 
   const markdownSign = signedFiles[signedFiles.length - 1];
@@ -283,6 +297,8 @@ export async function executePublishPipeline(
       contentR2Key: markdownSign.r2Key,
       attachments: attachmentsPayload,
       expiration,
+      visibility,
+      passcode: visibility === 'protected' ? passcode : undefined,
     },
     baseUrl,
   );

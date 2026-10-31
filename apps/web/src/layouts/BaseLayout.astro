@@ -12,12 +12,15 @@ interface Props {
   title?: string;
   description?: string;
   image?: string;
+  /** Cloudflare Turnstile スクリプトを含めるかどうか。 */
+  includeTurnstile?: boolean;
 }
 
 const {
   title = 'patto-md - Markdown文書を瞬時にWeb公開',
   description = 'ローカルのMarkdownファイルと添付画像をドラッグ&ドロップするだけで、即座にWeb公開・共有できるWebサービス。',
   image = '/ogp.jpeg',
+  includeTurnstile = false,
 } = Astro.props;
 
 const ogImageUrl = new URL(image, Astro.url).href;
@@ -58,6 +61,14 @@ const resolvedApiUrl = resolveServerApiBaseUrl(Astro.locals);
     <meta name="twitter:title" content={title} />
     <meta name="twitter:description" content={description} />
     <meta name="twitter:image" content={ogImageUrl} />
+
+    {includeTurnstile && (
+      <script
+        src="https://challenges.cloudflare.com/turnstile/v0/api.js?render=explicit"
+        async
+        defer
+      ></script>
+    )}
   </head>
   <body class="flex min-h-full flex-col bg-neutral-950 font-sans selection:bg-blue-500/20 selection:text-blue-300">
     <Header />

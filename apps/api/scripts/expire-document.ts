@@ -11,8 +11,8 @@ import process from 'node:process';
  * ```
  */
 
-/** コマンドライン引数から対象の Slug を取得。 */
-const targetSlug = process.argv[2]?.trim();
+const args = process.argv.slice(2);
+const targetSlug = args.find((arg) => !arg.startsWith('--'))?.trim();
 
 if (!targetSlug) {
   console.error('エラー: 対象のドキュメント Slug が指定されていません。');

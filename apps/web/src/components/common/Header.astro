@@ -37,12 +37,24 @@ const isDocumentsActive = currentPath.startsWith('/documents');
         href="/documents"
         class:list={[
           'text-xs font-mono transition-colors hover:text-neutral-100',
-          isDocumentsActive
+          isDocumentsActive && Astro.url.searchParams.get('tab') !== 'mine'
             ? 'text-blue-400 font-semibold'
             : 'text-neutral-400',
         ]}
       >
         公開一覧
+      </a>
+      <a
+        href="/my"
+        class:list={[
+          'text-xs font-mono transition-colors hover:text-neutral-100',
+          currentPath.startsWith('/my') ||
+          Astro.url.searchParams.get('tab') === 'mine'
+            ? 'text-blue-400 font-semibold'
+            : 'text-neutral-400',
+        ]}
+      >
+        マイページ
       </a>
       <a
         href="https://github.com/MI-1222/patto-md"

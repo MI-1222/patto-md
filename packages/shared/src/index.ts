@@ -2,9 +2,11 @@
  * 共有パッケージのエントリーポイント。
  */
 
-export * from './constants';
-export * from './models';
-export * from './schemas';
+export * from './constants/index.ts';
+export * from './models/index.ts';
+export * from './schemas/index.ts';
+export * from './utils/index.ts';
+export { z } from 'zod';
 
 /** 共有モジュール名識別用定数。 */
 export const SHARED_MODULE_NAME = 'shared';

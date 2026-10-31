@@ -6,6 +6,11 @@ import {
   commitDocument,
   fetchDocument,
   fetchDocuments,
+  verifyPasscode,
+  claimDocument,
+  fetchCurrentUser,
+  reportDocument,
+  logout,
   ApiError,
 } from '../client';
 import type {
@@ -78,6 +83,49 @@ describe('APIクライアント(src/lib/api/client.ts)', () => {
       expect(result).toEqual(mockResponse);
     });
 
+    it('Turnstile トークンが渡された場合、署名APIのリクエストヘッダーに付与して送信する。', async () => {
+      const mockResponse: UploadSignResponse = {
+        files: [
+          {
+            fileId: 'mock-uuid-1',
+            fileName: 'test.png',
+            r2Key: 'temp/uploads/mock-uuid-1/test.png',
+            uploadUrl: 'https://r2.example.com/put-url',
+          },
+        ],
+      };
+
+      const fetchMock = vi.fn().mockResolvedValue({
+        ok: true,
+        status: 200,
+        json: async () => mockResponse,
+      } as Response);
+      globalThis.fetch = fetchMock;
+
+      const items: UploadSignFileItem[] = [
+        { name: 'test.png', size: 1024, type: 'image/png' },
+      ];
+
+      const result = await requestUploadSign(
+        items,
+        'http://localhost:8787',
+        'dummy-turnstile-token',
+      );
+
+      expect(fetchMock).toHaveBeenCalledWith(
+        'http://localhost:8787/api/upload/sign',
+        {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'x-turnstile-token': 'dummy-turnstile-token',
+          },
+          body: JSON.stringify({ files: items }),
+        },
+      );
+      expect(result).toEqual(mockResponse);
+    });
+
     it('APIエラー時に適切なエラーメッセージを持ったApiErrorをthrowする。', async () => {
       globalThis.fetch = vi.fn().mockResolvedValue({
         ok: false,
@@ -141,6 +189,8 @@ describe('APIクライアント(src/lib/api/client.ts)', () => {
         id: 'AbCdEf123456',
         url: '/p/AbCdEf123456',
         title: 'テスト文書',
+        editToken: 'pt_edt_0123456789abcdef0123456789abcdef0123456789a',
+        modifyToken: 'pt_mod_0123456789abcdef0123456789abcdef0123456789a',
         expiresAt: '2026-11-05T00:00:00.000Z',
         createdAt: '2026-10-29T00:00:00.000Z',
       };
@@ -249,6 +299,126 @@ describe('APIクライアント(src/lib/api/client.ts)', () => {
         fetchDocument('NotExist1234', 'http://localhost:8787'),
       ).rejects.toThrow('ドキュメントが見つかりません。');
     });
+
+    it('`Cookie` オプションが指定された場合、リクエストヘッダーに `Cookie` を付与して送信する。', async () => {
+      const mockDocument = {
+        id: 'AbCdEf123456',
+        title: 'テスト',
+        content: '本文',
+        visibility: 'protected',
+        status: 'published',
+        expiresAt: null,
+        createdAt: '2026-10-30T00:00:00.000Z',
+        updatedAt: '2026-10-30T00:00:00.000Z',
+        attachments: [],
+      };
+
+      globalThis.fetch = vi.fn().mockResolvedValue({
+        ok: true,
+        status: 200,
+        headers: new Headers(),
+        json: async () => mockDocument,
+      } as unknown as Response);
+
+      await fetchDocument('AbCdEf123456', 'http://localhost:8787', fetch, {
+        cookie: 'patto_doc_auth_AbCdEf123456=dummy.jwt.token',
+      });
+
+      expect(globalThis.fetch).toHaveBeenCalledWith(
+        'http://localhost:8787/api/documents/AbCdEf123456',
+        expect.objectContaining({
+          method: 'GET',
+          headers: {
+            Cookie: 'patto_doc_auth_AbCdEf123456=dummy.jwt.token',
+          },
+        }),
+      );
+    });
+
+    it('パスコード保護中で 401 が返却された場合、例外にならず保護情報を透過して返却する。', async () => {
+      const protectedDoc = {
+        id: 'ProtDoc12345',
+        title: '保護された文書',
+        content: '',
+        visibility: 'protected',
+        isProtected: true,
+        status: 'published',
+        expiresAt: null,
+        createdAt: '2026-10-30T00:00:00.000Z',
+        updatedAt: '2026-10-30T00:00:00.000Z',
+        attachments: [],
+      };
+
+      globalThis.fetch = vi.fn().mockResolvedValue({
+        ok: false,
+        status: 401,
+        headers: new Headers(),
+        json: async () => ({
+          error: {
+            message: 'このドキュメントはパスコードで保護されています。',
+          },
+          document: protectedDoc,
+        }),
+      } as unknown as Response);
+
+      const result = await fetchDocument(
+        'ProtDoc12345',
+        'http://localhost:8787',
+      );
+
+      expect(result.document).toEqual(protectedDoc);
+      expect(result.document.isProtected).toBe(true);
+      expect(result.cacheControl).toBe('private, no-cache, no-store');
+    });
+  });
+
+  describe('`verifyPasscode`', () => {
+    it('正常時にパスコード照合APIへ `POST` し、トークンレスポンスを取得する。', async () => {
+      const mockResponse = {
+        success: true,
+        token: 'sample.jwt.token',
+        expiresAt: '2026-11-01T00:00:00.000Z',
+      };
+
+      globalThis.fetch = vi.fn().mockResolvedValue({
+        ok: true,
+        status: 200,
+        headers: new Headers(),
+        json: async () => mockResponse,
+      } as unknown as Response);
+
+      const result = await verifyPasscode(
+        'ProtDoc12345',
+        'secret-pass',
+        'http://localhost:8787',
+      );
+
+      expect(globalThis.fetch).toHaveBeenCalledWith(
+        'http://localhost:8787/api/documents/ProtDoc12345/verify-passcode',
+        expect.objectContaining({
+          method: 'POST',
+          credentials: 'include',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ passcode: 'secret-pass' }),
+        }),
+      );
+      expect(result).toEqual(mockResponse);
+    });
+
+    it('パスコード不一致時に 401 の `ApiError` を throw する。', async () => {
+      globalThis.fetch = vi.fn().mockResolvedValue({
+        ok: false,
+        status: 401,
+        headers: new Headers(),
+        json: async () => ({
+          error: { message: 'パスコードが一致しません。' },
+        }),
+      } as unknown as Response);
+
+      await expect(
+        verifyPasscode('ProtDoc12345', 'wrong-pass', 'http://localhost:8787'),
+      ).rejects.toThrow('パスコードが一致しません。');
+    });
   });
 
   describe('fetchDocuments', () => {
@@ -295,6 +465,33 @@ describe('APIクライアント(src/lib/api/client.ts)', () => {
       expect(result.cacheControl).toBe('public, max-age=10');
     });
 
+    it('mine: true 指定時にクエリパラメータと credentials: include を付与してリクエストする。', async () => {
+      const mockListResponse = {
+        items: [],
+        total: 0,
+        page: 1,
+        limit: 12,
+        totalPages: 0,
+      };
+
+      globalThis.fetch = vi.fn().mockResolvedValue({
+        ok: true,
+        status: 200,
+        headers: new Headers(),
+        json: async () => mockListResponse,
+      } as unknown as Response);
+
+      await fetchDocuments({
+        mine: true,
+        baseUrl: 'http://localhost:8787',
+      });
+
+      expect(globalThis.fetch).toHaveBeenCalledWith(
+        'http://localhost:8787/api/documents?mine=true',
+        { method: 'GET', credentials: 'include' },
+      );
+    });
+
     it('APIエラー時に適切な `ApiError` を送出する。', async () => {
       globalThis.fetch = vi.fn().mockResolvedValue({
         ok: false,
@@ -306,6 +503,175 @@ describe('APIクライアント(src/lib/api/client.ts)', () => {
       } as unknown as Response);
 
       await expect(fetchDocuments()).rejects.toThrow('一覧取得エラー。');
+    });
+  });
+
+  describe('claimDocument', () => {
+    it('正常時に所有権移譲APIへPOSTリクエストを送信し、レスポンスを取得する。', async () => {
+      const mockResponse = {
+        success: true,
+        id: 'valid-slug-12',
+        ownerUserId: 'gh-12345',
+        ownerProvider: 'github',
+        updatedAt: '2026-10-31T00:00:00.000Z',
+      };
+
+      globalThis.fetch = vi.fn().mockResolvedValue({
+        ok: true,
+        status: 200,
+        json: async () => mockResponse,
+      } as unknown as Response);
+
+      const result = await claimDocument(
+        'valid-slug-12',
+        'pt_edt_testtoken12345',
+        'http://localhost:8787',
+      );
+
+      expect(globalThis.fetch).toHaveBeenCalledWith(
+        'http://localhost:8787/api/documents/valid-slug-12/claim',
+        expect.objectContaining({
+          method: 'POST',
+          credentials: 'include',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ editToken: 'pt_edt_testtoken12345' }),
+        }),
+      );
+      expect(result).toEqual(mockResponse);
+    });
+
+    it('所有権移譲APIエラー時に `ApiError` を送出する。', async () => {
+      globalThis.fetch = vi.fn().mockResolvedValue({
+        ok: false,
+        status: 409,
+        json: async () => ({
+          error: {
+            message: 'このドキュメントは既に別のアカウントに所有されています。',
+          },
+        }),
+      } as unknown as Response);
+
+      await expect(
+        claimDocument(
+          'valid-slug-12',
+          'pt_edt_testtoken12345',
+          'http://localhost:8787',
+        ),
+      ).rejects.toThrow(
+        'このドキュメントは既に別のアカウントに所有されています。',
+      );
+    });
+  });
+
+  describe('fetchCurrentUser', () => {
+    it('認証済みユーザー情報が存在する場合、ユーザーオブジェクトを返却する。', async () => {
+      const mockUser = {
+        provider: 'github',
+        providerUserId: '12345',
+        username: 'octocat',
+        avatarUrl: null,
+      };
+
+      globalThis.fetch = vi.fn().mockResolvedValue({
+        ok: true,
+        status: 200,
+        json: async () => ({ user: mockUser }),
+      } as unknown as Response);
+
+      const user = await fetchCurrentUser('http://localhost:8787');
+      expect(user).toEqual(mockUser);
+      expect(globalThis.fetch).toHaveBeenCalledWith(
+        'http://localhost:8787/api/auth/me',
+        { method: 'GET', credentials: 'include' },
+      );
+    });
+
+    it('未認証時は null を返却する。', async () => {
+      globalThis.fetch = vi.fn().mockResolvedValue({
+        ok: true,
+        status: 200,
+        json: async () => ({ user: null }),
+      } as unknown as Response);
+
+      const user = await fetchCurrentUser('http://localhost:8787');
+      expect(user).toBeNull();
+    });
+  });
+
+  describe('logout', () => {
+    it('正常時にログアウトAPIへPOSTリクエストを送信する。', async () => {
+      globalThis.fetch = vi.fn().mockResolvedValue({
+        ok: true,
+        status: 200,
+        json: async () => ({ success: true }),
+      } as unknown as Response);
+
+      const result = await logout('http://localhost:8787');
+      expect(result).toEqual({ success: true });
+      expect(globalThis.fetch).toHaveBeenCalledWith(
+        'http://localhost:8787/api/auth/logout',
+        { method: 'POST', credentials: 'include' },
+      );
+    });
+  });
+
+  describe('reportDocument', () => {
+    it('正常時に通報APIへPOSTリクエストを送信し、結果を取得する。', async () => {
+      const mockResponse = {
+        success: true,
+        message: '通報を受け付けました。',
+      };
+
+      globalThis.fetch = vi.fn().mockResolvedValue({
+        ok: true,
+        status: 200,
+        json: async () => mockResponse,
+      } as unknown as Response);
+
+      const result = await reportDocument(
+        'AbCdEf123456',
+        {
+          reason: 'phishing',
+          details: '不審なリンクが含まれています。',
+        },
+        'dummy-turnstile-token',
+        'http://localhost:8787',
+      );
+
+      expect(result).toEqual(mockResponse);
+      expect(globalThis.fetch).toHaveBeenCalledWith(
+        'http://localhost:8787/api/documents/AbCdEf123456/report',
+        {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'x-turnstile-token': 'dummy-turnstile-token',
+          },
+          body: JSON.stringify({
+            reason: 'phishing',
+            details: '不審なリンクが含まれています。',
+          }),
+        },
+      );
+    });
+
+    it('APIエラー時に適切なエラーメッセージを含む ApiError を投げる。', async () => {
+      globalThis.fetch = vi.fn().mockResolvedValue({
+        ok: false,
+        status: 400,
+        json: async () => ({
+          error: { message: '入力内容に誤りがあります。' },
+        }),
+      } as unknown as Response);
+
+      await expect(
+        reportDocument(
+          'AbCdEf123456',
+          { reason: 'spam' },
+          'dummy-token',
+          'http://localhost:8787',
+        ),
+      ).rejects.toThrow('入力内容に誤りがあります。');
     });
   });
 });

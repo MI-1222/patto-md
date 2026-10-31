@@ -7,7 +7,7 @@
     "dev": "ASTRO_TELEMETRY_DISABLED=1 astro dev",
     "build": "ASTRO_TELEMETRY_DISABLED=1 astro build",
     "deploy": "wrangler deploy",
-    "preview": "wrangler pages dev dist --compatibility-date=2025-02-24 --compatibility-flags=nodejs_compat",
+    "preview": "wrangler dev",
     "typecheck": "ASTRO_TELEMETRY_DISABLED=1 astro sync && tsc --noEmit",
     "test": "vitest run"
   },
@@ -40,6 +40,6 @@
     "@types/unist": "^3.0.3",
     "typescript": "^5.7.3",
     "vitest": "^5.0.5",
-    "wrangler": "^3.114.17"
+    "wrangler": "^4"
   }
 }

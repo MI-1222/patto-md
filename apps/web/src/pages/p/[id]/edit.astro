@@ -1,0 +1,61 @@
+---
+/**
+ * ドキュメント編集画面のエントリーポイント。
+ *
+ * エッジSSR上でドキュメントメタデータとMarkdown本文を取得し、
+ * クライアントアイランドコンポーネントへ渡して編集および更新パイプラインを実行する。
+ */
+import BaseLayout from '../../../layouts/BaseLayout.astro';
+import { SLUG_PATTERN } from '@patto-md/shared';
+import {
+  fetchDocument,
+  getFetcher,
+  resolveServerApiBaseUrl,
+} from '../../../lib/api';
+import { DocumentEditContainer } from '../../../components/editor';
+
+const { id } = Astro.params;
+
+if (!id || !SLUG_PATTERN.test(id)) {
+  return Astro.redirect('/404');
+}
+
+/** サーバーサイド実行時に解決されたAPIベースURL。 */
+const apiBaseUrl = resolveServerApiBaseUrl(Astro.locals);
+/** サーバーサイド実行時に解決されたFetcher(Service Binding優先)。 */
+const fetcher = getFetcher(Astro.locals);
+
+let docData;
+try {
+  docData = await fetchDocument(id, apiBaseUrl, fetcher);
+} catch (error) {
+  console.error('SSR fetchDocument エラー:', error);
+  return Astro.redirect('/404');
+}
+
+const { document: doc } = docData;
+
+/** Cloudflare Turnstile サイトキー。 */
+const turnstileSiteKey =
+  import.meta.env.PUBLIC_TURNSTILE_SITE_KEY ||
+  (
+    Astro.locals as {
+      runtime?: { env?: { PUBLIC_TURNSTILE_SITE_KEY?: string } };
+    }
+  )?.runtime?.env?.PUBLIC_TURNSTILE_SITE_KEY ||
+  '';
+
+/** 画面タイトル。 */
+const pageTitle = `編集: ${doc.title} - patto-md`;
+---
+
+<BaseLayout title={pageTitle} includeTurnstile={true}>
+  <div class="mx-auto max-w-7xl px-4 py-8 sm:px-6 sm:py-12">
+    <DocumentEditContainer
+      client:load
+      initialDocument={doc}
+      turnstileSiteKey={turnstileSiteKey}
+      apiBaseUrl={apiBaseUrl}
+    />
+  </div>
+</BaseLayout>
