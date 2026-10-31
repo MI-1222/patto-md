@@ -39,6 +39,7 @@
     "@types/react": "^19.0.10",
     "@types/react-dom": "^19.0.4",
     "@types/unist": "^3.0.3",
+    "happy-dom": "^21.0.4",
     "typescript": "^5.7.3",
     "vitest": "^5.0.5",
     "wrangler": "^4"
