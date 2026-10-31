@@ -60,6 +60,7 @@ export const sanitizeSchema = {
       'className',
       'class',
       'style',
+      'data-mermaid-code',
     ],
     span: [
       ...(defaultSchema.attributes?.span || []),
@@ -78,6 +79,7 @@ export const sanitizeSchema = {
       'className',
       'class',
       'style',
+      'data-mermaid-code',
     ],
     a: updateAttributeDefinitions(
       defaultSchema.attributes?.a as Array<string | [string, ...unknown[]]>,
@@ -106,6 +108,94 @@ export const sanitizeSchema = {
     ],
   },
 };
+
+/** HAST内のMermaidコードブロックを一時的に退避し、`rehypePrism` による構文分解を防ぐ `rehype` プラグイン。 */
+function rehypeProtectMermaid() {
+  return (tree: HastRoot) => {
+    visit(tree, 'element', (node: Element, index, parent) => {
+      if (
+        node.tagName === 'pre' &&
+        Array.isArray(node.children) &&
+        node.children.length > 0
+      ) {
+        const firstChild = node.children[0];
+        if (
+          firstChild &&
+          firstChild.type === 'element' &&
+          firstChild.tagName === 'code'
+        ) {
+          const rawClassName = firstChild.properties?.className as unknown;
+          const classList: string[] = Array.isArray(rawClassName)
+            ? rawClassName.map((c) => String(c))
+            : typeof rawClassName === 'string'
+              ? rawClassName.split(' ')
+              : [];
+
+          const isMermaid = classList.some(
+            (c: string) => c === 'language-mermaid' || c === 'mermaid',
+          );
+
+          if (isMermaid) {
+            /** コードブロック内の生テキスト。 */
+            const codeText = firstChild.children
+              .filter((c) => c.type === 'text')
+              .map((c) => (c as { value: string }).value)
+              .join('');
+
+            /** 一時的なMermaid退避用要素。 */
+            const placeholderNode: Element = {
+              type: 'element',
+              tagName: 'div',
+              properties: {
+                className: ['mermaid-block'],
+                'data-mermaid-code': codeText,
+              },
+              children: [{ type: 'text', value: codeText }],
+            };
+
+            if (parent && typeof index === 'number') {
+              (parent.children as unknown[])[index] = placeholderNode;
+            }
+          }
+        }
+      }
+    });
+  };
+}
+
+/** 一時退避されたMermaid要素を、安全な `<pre class="mermaid"><code>` 構造へ復元する `rehype` プラグイン。 */
+function rehypeRestoreMermaid() {
+  return (tree: HastRoot) => {
+    visit(tree, 'element', (node: Element) => {
+      if (
+        node.tagName === 'div' &&
+        Array.isArray(node.properties?.className) &&
+        node.properties.className.includes('mermaid-block')
+      ) {
+        /** 退避されていたMermaid生コード文字列。 */
+        const codeText = String(node.properties['data-mermaid-code'] ?? '');
+        node.children = [
+          {
+            type: 'element',
+            tagName: 'pre',
+            properties: {
+              className: ['mermaid'],
+              'data-mermaid-code': codeText,
+            },
+            children: [
+              {
+                type: 'element',
+                tagName: 'code',
+                properties: {},
+                children: [{ type: 'text', value: codeText }],
+              },
+            ],
+          },
+        ];
+      }
+    });
+  };
+}
 
 /**
  * HAST内の画像ノードを走査し、アセットURLを正規化する `rehype` プラグイン。
@@ -153,7 +243,9 @@ const markdownProcessor = unified()
       children: [{ type: 'text', value: '#' }],
     },
   })
+  .use(rehypeProtectMermaid)
   .use(rehypePrism, { ignoreMissing: true })
+  .use(rehypeRestoreMermaid)
   .use(rehypeResolveAssetUrls)
   .use(
     rehypeSanitize,

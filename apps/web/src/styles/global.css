@@ -146,3 +146,46 @@ code[class*='language-'] {
   color: #52525b;
   content: attr(line);
 }
+
+/* --- Mermaid / Pele ダイアグラム描画スタイル --- */
+:root,
+.pele,
+.mermaid-block,
+.mermaid-container {
+  --pele-bg: transparent;
+  --pele-fg: #f4f4f5;
+  --pele-muted: #71717a;
+  --pele-line: #a1a1aa;
+  --pele-surface: #18181b;
+  --pele-surface-alt: #27272a;
+  --pele-border: #3f3f46;
+  --pele-accent: #60a5fa;
+  --pele-font: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+  --pele-radius: 6px;
+  --pele-error: #f87171;
+}
+
+.mermaid-block {
+  position: relative;
+  margin-top: 1.5rem;
+  margin-bottom: 1.5rem;
+  border-radius: 0.75rem;
+  border: 1px solid #27272a;
+  background-color: rgba(9, 9, 11, 0.7);
+  backdrop-filter: blur(8px);
+  overflow: hidden;
+}
+
+.mermaid-block .mermaid-rendered {
+  padding: 1.25rem;
+  overflow-x: auto;
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  min-height: 4.5rem;
+}
+
+.mermaid-block .mermaid-rendered svg {
+  max-width: 100%;
+  height: auto;
+}

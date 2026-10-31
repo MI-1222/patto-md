@@ -124,3 +124,11 @@ if (!isProtected && doc.content) {
     </div>
   )}
 </BaseLayout>
+
+<script>
+  import { renderAllMermaidBlocks } from '../../../lib/mermaid';
+
+  if (document.querySelector('.mermaid-block')) {
+    void renderAllMermaidBlocks();
+  }
+</script>

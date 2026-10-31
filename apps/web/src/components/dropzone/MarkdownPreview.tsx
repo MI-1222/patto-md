@@ -1,6 +1,7 @@
 import React from 'react';
 import type { Root, RootContent } from 'mdast';
 import { WarningSvg } from '../svg/FileIcons';
+import { MermaidBlock } from '../mermaid';
 
 /** ローカルプレビューコンポーネントのプロパティ定義。 */
 interface MarkdownPreviewProps {
@@ -134,6 +135,9 @@ function renderAstNode(
       );
 
     case 'code':
+      if (node.lang === 'mermaid') {
+        return <MermaidBlock key={key} code={node.value} />;
+      }
       return (
         <div key={key} className="overflow-hidden rounded-xl bg-neutral-950">
           {node.lang && (

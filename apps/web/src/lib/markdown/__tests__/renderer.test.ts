@@ -95,6 +95,26 @@ const greeting: string = "hello";
 
     expect(html).toContain('src="/api/assets/temp/uploads/123/image.png"');
   });
+
+  it('Mermaidコードブロックをシンタックスハイライトから除外し、プレースホルダーとして出力する。', async () => {
+    const markdown = `
+\`\`\`mermaid
+flowchart TD
+    A[開始] --> B{判定}
+    B -->|Yes| C[完了]
+    B -->|No| D[終了]
+\`\`\`
+`;
+
+    const { html } = await renderMarkdown(markdown);
+
+    expect(html).toContain('class="mermaid-block"');
+    expect(html).toContain('data-mermaid-code="flowchart TD');
+    expect(html).toContain('<pre class="mermaid"');
+    expect(html).not.toContain('class="language-mermaid');
+    expect(html).not.toContain('token keyword');
+    expect(html).toContain('A[開始] --> B{判定}');
+  });
 });
 
 describe('プレーンテキスト抽出(extractDescription)', () => {
