@@ -142,40 +142,64 @@ export function openMermaidModal(
     existingModal.remove();
   }
 
+  /** モーダル展開前の元の `body` スクロール設定。 */
+  const originalOverflow = document.body.style.overflow;
+  document.body.style.overflow = 'hidden';
+
   /** モーダル外枠オーバーレイ要素。 */
   const modalOverlay = document.createElement('div');
   modalOverlay.id = 'mermaid-zoom-modal';
   modalOverlay.className =
     'fixed inset-0 z-50 flex flex-col bg-neutral-950/85 backdrop-blur-md p-4 sm:p-6 animate-fade-in';
 
-  modalOverlay.innerHTML = `
-    <div class="flex items-center justify-between border-b border-neutral-800 pb-3 text-neutral-200">
-      <div class="flex items-center gap-2">
-        <span class="text-xs font-semibold uppercase tracking-wider text-neutral-400">${title}</span>
-      </div>
-      <button
-        type="button"
-        id="mermaid-modal-close-btn"
-        class="rounded-lg p-1.5 text-neutral-400 transition-colors hover:bg-neutral-800 hover:text-neutral-100"
-        aria-label="閉じる"
-      >
-        <svg class="size-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12" />
-        </svg>
-      </button>
-    </div>
-    <div class="flex-1 overflow-auto p-4 flex items-center justify-center">
-      <div class="max-w-none max-h-none overflow-auto p-2 sm:p-6 [&>svg]:max-w-none [&>svg]:h-auto">
-        ${svgMarkup}
-      </div>
-    </div>
+  /** モーダルヘッダー領域要素。 */
+  const header = document.createElement('div');
+  header.className =
+    'flex items-center justify-between border-b border-neutral-800 pb-3 text-neutral-200';
+
+  /** タイトル表示コンテナ要素。 */
+  const titleWrapper = document.createElement('div');
+  titleWrapper.className = 'flex items-center gap-2';
+  const titleSpan = document.createElement('span');
+  titleSpan.className =
+    'text-xs font-semibold uppercase tracking-wider text-neutral-400';
+  titleSpan.textContent = title;
+  titleWrapper.appendChild(titleSpan);
+
+  /** モーダル閉じるボタン要素。 */
+  const closeBtn = document.createElement('button');
+  closeBtn.type = 'button';
+  closeBtn.id = 'mermaid-modal-close-btn';
+  closeBtn.className =
+    'rounded-lg p-1.5 text-neutral-400 transition-colors hover:bg-neutral-800 hover:text-neutral-100';
+  closeBtn.setAttribute('aria-label', '閉じる');
+  closeBtn.innerHTML = `
+    <svg class="size-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+      <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12" />
+    </svg>
   `;
+
+  header.appendChild(titleWrapper);
+  header.appendChild(closeBtn);
+  modalOverlay.appendChild(header);
+
+  /** SVGコンテンツ領域要素。 */
+  const contentArea = document.createElement('div');
+  contentArea.className =
+    'flex-1 overflow-auto p-4 flex items-center justify-center';
+  const svgWrapper = document.createElement('div');
+  svgWrapper.className =
+    'max-w-none max-h-none overflow-auto p-2 sm:p-6 [&>svg]:max-w-none [&>svg]:h-auto';
+  svgWrapper.innerHTML = svgMarkup;
+  contentArea.appendChild(svgWrapper);
+  modalOverlay.appendChild(contentArea);
 
   document.body.appendChild(modalOverlay);
 
-  /** モーダルおよびイベントリスナーを破棄するクリーンアップ関数。 */
+  /** モーダルおよびイベントリスナーを破棄し、背景スクロールを復元するクリーンアップ関数。 */
   const cleanup = () => {
     modalOverlay.remove();
+    document.body.style.overflow = originalOverflow;
     document.removeEventListener('keydown', handleKeyDown);
   };
 
@@ -186,15 +210,18 @@ export function openMermaidModal(
     }
   };
 
-  modalOverlay
-    .querySelector('#mermaid-modal-close-btn')
-    ?.addEventListener('click', cleanup);
+  closeBtn.addEventListener('click', cleanup);
 
-  modalOverlay.addEventListener('click', (e) => {
-    if (e.target === modalOverlay) {
-      cleanup();
+  /** ダイアグラム本体(SVG要素)およびヘッダー領域以外の余白クリック時にモーダルを閉じるハンドラー。 */
+  const handleOverlayClick = (e: MouseEvent) => {
+    const target = e.target as Element | null;
+    if (!target || header.contains(target) || target.closest('svg')) {
+      return;
     }
-  });
+    cleanup();
+  };
+
+  modalOverlay.addEventListener('click', handleOverlayClick);
 
   document.addEventListener('keydown', handleKeyDown);
 }

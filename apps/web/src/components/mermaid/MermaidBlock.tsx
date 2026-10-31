@@ -73,7 +73,10 @@ export const MermaidBlock: FC<MermaidBlockProps> = ({ code }) => {
   };
 
   return (
-    <div className="mermaid-block relative my-6 overflow-hidden rounded-xl border border-neutral-800 bg-neutral-950/70 backdrop-blur-sm">
+    <div
+      className="mermaid-block relative my-6 overflow-hidden rounded-xl border border-neutral-800 bg-neutral-950/70 backdrop-blur-sm"
+      data-mermaid-rendered={svg || error ? 'true' : 'false'}
+    >
       <div className="flex items-center justify-between border-b border-neutral-800/80 bg-neutral-900/60 px-4 py-2 text-xs text-neutral-400 select-none">
         <div className="flex items-center gap-2">
           {error ? (

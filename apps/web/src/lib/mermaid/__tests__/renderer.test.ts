@@ -14,6 +14,7 @@ class MockElement {
   public tagName: string;
   public id: string = '';
   public className: string = '';
+  public style: Record<string, string> = {};
   private _innerHTML: string = '';
   public textContent: string = '';
   public attributes: Map<string, string> = new Map();
@@ -78,6 +79,27 @@ class MockElement {
     this.eventListeners.set(event, list);
   }
 
+  contains(other: MockElement): boolean {
+    if (other === this) {
+      return true;
+    }
+    let curr = other.parentElement;
+    while (curr) {
+      if (curr === this) {
+        return true;
+      }
+      curr = curr.parentElement;
+    }
+    return false;
+  }
+
+  closest(selector: string): MockElement | null {
+    if (selector === 'svg' && this.tagName.toLowerCase() === 'svg') {
+      return this;
+    }
+    return this.parentElement ? this.parentElement.closest(selector) : null;
+  }
+
   querySelector(selector: string): MockElement | null {
     const all = this.querySelectorAll(selector);
     return all.length > 0 ? all[0] : null;
@@ -88,7 +110,9 @@ class MockElement {
 
     const walk = (el: MockElement) => {
       let matched = false;
-      if (
+      if (selector.startsWith('#') && el.id === selector.slice(1)) {
+        matched = true;
+      } else if (
         selector === '.mermaid-block' &&
         el.className.includes('mermaid-block')
       ) {
@@ -146,7 +170,22 @@ class MockDocument {
   }
 
   getElementById(id: string): MockElement | null {
-    return this.elementsById.get(id) ?? null;
+    if (this.elementsById.has(id)) {
+      return this.elementsById.get(id) ?? null;
+    }
+    const find = (el: MockElement): MockElement | null => {
+      if (el.id === id) {
+        return el;
+      }
+      for (const child of el.children) {
+        const found = find(child);
+        if (found) {
+          return found;
+        }
+      }
+      return null;
+    };
+    return find(this.body);
   }
 
   querySelector(selector: string): MockElement | null {
@@ -331,7 +370,8 @@ describe('DOMマウント処理 (renderMermaidElement / renderAllMermaidBlocks)'
     expect(block2.innerHTML).toContain('<svg');
   });
 
-  it('openMermaidModal で全画面モーダルがDOMに追加される。', () => {
+  it('openMermaidModal で全画面モーダルがDOMに追加され、bodyのスクロールがロックされる。', () => {
+    mockDoc.body.style.overflow = '';
     const svgContent = '<svg><g></g></svg>';
     openMermaidModal(svgContent, '拡大テスト');
 
@@ -341,5 +381,64 @@ describe('DOMマウント処理 (renderMermaidElement / renderAllMermaidBlocks)'
     expect(modal).toBeDefined();
     expect(modal?.innerHTML).toContain('拡大テスト');
     expect(modal?.innerHTML).toContain(svgContent);
+    expect(mockDoc.body.style.overflow).toBe('hidden');
+
+    const closeBtn = modal?.querySelector('#mermaid-modal-close-btn');
+    expect(closeBtn).toBeDefined();
+    closeBtn?.eventListeners.get('click')?.forEach((h) => h());
+    expect(mockDoc.body.style.overflow).toBe('');
+    expect(
+      mockDoc.body.children.find((c) => c.id === 'mermaid-zoom-modal'),
+    ).toBeUndefined();
+  });
+
+  it('openMermaidModal でダイアグラム外の余白領域をクリックした際にモーダルが閉じること。', () => {
+    mockDoc.body.style.overflow = '';
+    const svgContent = '<svg><g></g></svg>';
+    openMermaidModal(svgContent, '余白テスト');
+
+    const modal = mockDoc.body.children.find(
+      (c) => c.id === 'mermaid-zoom-modal',
+    );
+    expect(modal).toBeDefined();
+
+    // モーダル全体のクリックリスナーを取得
+    const clickListeners = modal?.eventListeners.get('click') ?? [];
+    expect(clickListeners.length).toBeGreaterThan(0);
+
+    // 余白領域（modal自身、またはSVG外のdiv要素）をクリックしたケースを模擬
+    const outerMargin = mockDoc.createElement('div');
+    modal?.appendChild(outerMargin);
+
+    clickListeners.forEach((handler) => handler({ target: outerMargin }));
+    expect(mockDoc.body.style.overflow).toBe('');
+    expect(
+      mockDoc.body.children.find((c) => c.id === 'mermaid-zoom-modal'),
+    ).toBeUndefined();
+  });
+
+  it('openMermaidModal でSVG内部をクリックした際はモーダルが閉じないこと。', () => {
+    mockDoc.body.style.overflow = '';
+    const svgContent = '<svg><g></g></svg>';
+    openMermaidModal(svgContent, 'SVGテスト');
+
+    const modal = mockDoc.body.children.find(
+      (c) => c.id === 'mermaid-zoom-modal',
+    );
+    expect(modal).toBeDefined();
+
+    const clickListeners = modal?.eventListeners.get('click') ?? [];
+    expect(clickListeners.length).toBeGreaterThan(0);
+
+    // SVG要素そのものをクリックした場合を模擬
+    const svgEl = mockDoc.createElement('svg');
+    modal?.appendChild(svgEl);
+
+    clickListeners.forEach((handler) => handler({ target: svgEl }));
+    // モーダルが閉じずに残っていること
+    expect(
+      mockDoc.body.children.find((c) => c.id === 'mermaid-zoom-modal'),
+    ).toBeDefined();
+    expect(mockDoc.body.style.overflow).toBe('hidden');
   });
 });
