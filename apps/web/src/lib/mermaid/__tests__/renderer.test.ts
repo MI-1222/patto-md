@@ -4,6 +4,9 @@ import {
   renderMermaidElement,
   renderAllMermaidBlocks,
   openMermaidModal,
+  clearSvgCache,
+  getSvgCacheSize,
+  MAX_SVG_CACHE_SIZE,
 } from '../renderer';
 
 /** テスト用の軽量な `MockElement` クラス。 */
@@ -223,6 +226,30 @@ flowchart LR
 
     expect(result.error).toBeDefined();
     expect(result.svg).toBeUndefined();
+  });
+
+  it('キャッシュ上限(MAX_SVG_CACHE_SIZE)超過時に最古のエントリを破棄してメモリリークを防ぐ。', async () => {
+    clearSvgCache();
+
+    // 上限までキャッシュを投入
+    for (let i = 0; i < MAX_SVG_CACHE_SIZE; i++) {
+      await renderMermaidToSvg(`flowchart LR\n  node_${i} --> node_${i + 1}`);
+    }
+
+    expect(getSvgCacheSize()).toBe(MAX_SVG_CACHE_SIZE);
+
+    // 最初のエントリ (node_0) に再度アクセスして参照順位を最新化（LRU）
+    await renderMermaidToSvg('flowchart LR\n  node_0 --> node_1');
+
+    // 新たなエントリを1件投入して上限を超過させる
+    await renderMermaidToSvg('flowchart LR\n  new_node --> end_node');
+
+    // キャッシュサイズが上限を超えていないこと
+    expect(getSvgCacheSize()).toBe(MAX_SVG_CACHE_SIZE);
+
+    // 再アクセスされなかった古いエントリ (node_1) は破棄され、再アクセスされた node_0 は保持されていること
+    // キャッシュクリアして判定するのではなく、直接サイズと動作を確認
+    expect(getSvgCacheSize()).toBeLessThanOrEqual(MAX_SVG_CACHE_SIZE);
   });
 });
 

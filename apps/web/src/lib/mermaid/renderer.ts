@@ -7,8 +7,44 @@
  * 拡大表示モーダル、および生コードコピートグル機能を提供する。
  */
 
+/** メモリ内に保持するSVGキャッシュの最大件数。タイピング時の無制限蓄積を防ぐ。 */
+export const MAX_SVG_CACHE_SIZE = 100;
+
 /** 同一Mermaidコードの再パースを抑止するメモリ内SVGキャッシュ。 */
 const svgCache = new Map<string, string>();
+
+/** キャッシュからSVGを取得し、LRU順序を更新する。 */
+function getCachedSvg(key: string): string | undefined {
+  const value = svgCache.get(key);
+  if (value !== undefined) {
+    svgCache.delete(key);
+    svgCache.set(key, value);
+  }
+  return value;
+}
+
+/** キャッシュへSVGを保存する。上限超過時は最も古いエントリを破棄する。 */
+function setCachedSvg(key: string, value: string): void {
+  if (svgCache.has(key)) {
+    svgCache.delete(key);
+  } else if (svgCache.size >= MAX_SVG_CACHE_SIZE) {
+    const oldestKey = svgCache.keys().next().value;
+    if (oldestKey !== undefined) {
+      svgCache.delete(oldestKey);
+    }
+  }
+  svgCache.set(key, value);
+}
+
+/** テスト用または明示的なキャッシュ破棄関数。 */
+export function clearSvgCache(): void {
+  svgCache.clear();
+}
+
+/** 現在キャッシュされているエントリ件数を返却する。 */
+export function getSvgCacheSize(): number {
+  return svgCache.size;
+}
 
 /** `pele` モジュールの遅延インポート結果を保持するキャッシュ `Promise`。 */
 let peleModulePromise: Promise<typeof import('pele')> | null = null;
@@ -44,7 +80,7 @@ export async function renderMermaidToSvg(
     return { error: 'ダイアグラムのコードが空です。' };
   }
 
-  const cached = svgCache.get(trimmed);
+  const cached = getCachedSvg(trimmed);
   if (cached) {
     return { svg: cached };
   }
@@ -56,7 +92,7 @@ export async function renderMermaidToSvg(
       return { error: 'SVGの生成に失敗しました。' };
     }
 
-    svgCache.set(trimmed, result.svg);
+    setCachedSvg(trimmed, result.svg);
     return { svg: result.svg };
   } catch (err) {
     const message =
