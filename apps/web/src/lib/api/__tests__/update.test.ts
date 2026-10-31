@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
-import { executeUpdatePipeline } from '../update';
+import { executeUpdatePipeline, resolveUpdateExpiration } from '../update';
 import { updateDocument } from '../client';
 import type {
   UploadSignResponse,
@@ -300,5 +300,137 @@ describe('updateDocument クライアントAPI関数の検証', () => {
         'https://api.example.com',
       ),
     ).rejects.toThrow('更新権限がありません。');
+  });
+});
+
+describe('resolveUpdateExpiration 有効期限判定関数の検証', () => {
+  it('明示的な指定がある場合は最優先でその値を返すこと', () => {
+    const result = resolveUpdateExpiration({
+      explicitExpiration: '30days',
+      existingAttachments: [
+        {
+          id: '1',
+          fileName: 'img.png',
+          fileSize: 100,
+          mimeType: 'image/png',
+          r2Key: 'exp-1d/uploads/uuid/img.png',
+        },
+      ],
+      expiresAt: null,
+    });
+    expect(result).toBe('30days');
+  });
+
+  it('既存添付ファイルがある場合はそのキーのプレフィックスから判定すること', () => {
+    expect(
+      resolveUpdateExpiration({
+        existingAttachments: [
+          {
+            id: '1',
+            fileName: 'img.png',
+            fileSize: 100,
+            mimeType: 'image/png',
+            r2Key: 'exp-1d/uploads/uuid/img.png',
+          },
+        ],
+      }),
+    ).toBe('1day');
+
+    expect(
+      resolveUpdateExpiration({
+        existingAttachments: [
+          {
+            id: '2',
+            fileName: 'img.png',
+            fileSize: 100,
+            mimeType: 'image/png',
+            r2Key: 'exp-7d/uploads/uuid/img.png',
+          },
+        ],
+      }),
+    ).toBe('7days');
+
+    expect(
+      resolveUpdateExpiration({
+        existingAttachments: [
+          {
+            id: '3',
+            fileName: 'img.png',
+            fileSize: 100,
+            mimeType: 'image/png',
+            r2Key: 'exp-30d/uploads/uuid/img.png',
+          },
+        ],
+      }),
+    ).toBe('30days');
+
+    expect(
+      resolveUpdateExpiration({
+        existingAttachments: [
+          {
+            id: '4',
+            fileName: 'img.png',
+            fileSize: 100,
+            mimeType: 'image/png',
+            r2Key: 'permanent/uploads/uuid/img.png',
+          },
+        ],
+      }),
+    ).toBe('never');
+  });
+
+  it('既存添付ファイルがなく expiresAt が null の場合は never を返すこと', () => {
+    const result = resolveUpdateExpiration({
+      existingAttachments: [],
+      expiresAt: null,
+      createdAt: '2026-10-31T00:00:00.000Z',
+    });
+    expect(result).toBe('never');
+  });
+
+  it('既存添付ファイルがなく expiresAt と createdAt の差分からプリセットを判定すること', () => {
+    // 1日 (24時間)
+    expect(
+      resolveUpdateExpiration({
+        existingAttachments: [],
+        createdAt: '2026-10-31T00:00:00.000Z',
+        expiresAt: '2026-11-01T00:00:00.000Z',
+      }),
+    ).toBe('1day');
+
+    // 7日
+    expect(
+      resolveUpdateExpiration({
+        existingAttachments: [],
+        createdAt: '2026-10-31T00:00:00.000Z',
+        expiresAt: '2026-11-07T00:00:00.000Z',
+      }),
+    ).toBe('7days');
+
+    // 30日
+    expect(
+      resolveUpdateExpiration({
+        existingAttachments: [],
+        createdAt: '2026-10-31T00:00:00.000Z',
+        expiresAt: '2026-11-30T00:00:00.000Z',
+      }),
+    ).toBe('30days');
+  });
+
+  it('有効期限の判定材料がない場合は undefined を返すこと', () => {
+    expect(resolveUpdateExpiration({})).toBeUndefined();
+    expect(
+      resolveUpdateExpiration({
+        existingAttachments: [
+          {
+            id: 'legacy',
+            fileName: 'img.png',
+            fileSize: 100,
+            mimeType: 'image/png',
+            r2Key: 'temp/uploads/uuid/img.png',
+          },
+        ],
+      }),
+    ).toBeUndefined();
   });
 });
