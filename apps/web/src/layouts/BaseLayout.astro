@@ -14,6 +14,18 @@ interface Props {
   image?: string;
   /** Cloudflare Turnstile スクリプトを含めるかどうか。 */
   includeTurnstile?: boolean;
+  /** 正規化されたカノニカルURL。 */
+  canonicalUrl?: string;
+  /** OGP種別 (`website` または `article`)。デフォルトは `website`。 */
+  ogType?: 'website' | 'article';
+  /** Twitter Card 種別 (`summary` または `summary_large_image`)。デフォルトは `summary_large_image`。 */
+  twitterCard?: 'summary' | 'summary_large_image';
+  /** 検索エンジンのインデックス除外フラグ (`noindex, nofollow`)。 */
+  noindex?: boolean;
+  /** ドキュメント公開日時 (ISO 8601形式、`ogType === 'article'` 時に出力)。 */
+  publishedTime?: string;
+  /** ドキュメント最終更新日時 (ISO 8601形式、`ogType === 'article'` 時に出力)。 */
+  modifiedTime?: string;
 }
 
 const {
@@ -21,9 +33,22 @@ const {
   description = 'ローカルのMarkdownファイルと添付画像をドラッグ&ドロップするだけで、即座にWeb公開・共有できるWebサービス。',
   image = '/ogp.jpeg',
   includeTurnstile = false,
+  canonicalUrl,
+  ogType = 'website',
+  twitterCard = 'summary_large_image',
+  noindex = false,
+  publishedTime,
+  modifiedTime,
 } = Astro.props;
 
-const ogImageUrl = new URL(image, Astro.url).href;
+/** OGP画像の完全修飾絶対URL。 */
+const ogImageUrl =
+  image.startsWith('http://') || image.startsWith('https://')
+    ? image
+    : new URL(image, Astro.url).href;
+
+/** OGPで出力するパーマリンクURL。 */
+const ogPageUrl = canonicalUrl || Astro.url.href;
 
 /** サーバーサイド実行時に解決されたAPIベースURL。 */
 const resolvedApiUrl = resolveServerApiBaseUrl(Astro.locals);
@@ -38,6 +63,9 @@ const resolvedApiUrl = resolveServerApiBaseUrl(Astro.locals);
     <link rel="apple-touch-icon" href="/apple-touch-icon.png" />
     <meta name="generator" content={Astro.generator} />
 
+    {canonicalUrl && <link rel="canonical" href={canonicalUrl} />}
+    {noindex && <meta name="robots" content="noindex, nofollow" />}
+
     {resolvedApiUrl && <script
       is:inline
       define:vars={{ apiUrl: resolvedApiUrl }}
@@ -49,15 +77,21 @@ const resolvedApiUrl = resolveServerApiBaseUrl(Astro.locals);
     <meta name="description" content={description} />
 
     <!-- Open Graph Protocol (OGP) -->
-    <meta property="og:type" content="website" />
+    <meta property="og:type" content={ogType} />
     <meta property="og:title" content={title} />
     <meta property="og:description" content={description} />
-    <meta property="og:url" content={Astro.url.href} />
+    <meta property="og:url" content={ogPageUrl} />
     <meta property="og:site_name" content="patto-md" />
     <meta property="og:image" content={ogImageUrl} />
+    {ogType === 'article' && publishedTime && (
+      <meta property="article:published_time" content={publishedTime} />
+    )}
+    {ogType === 'article' && modifiedTime && (
+      <meta property="article:modified_time" content={modifiedTime} />
+    )}
 
     <!-- Twitter Card -->
-    <meta name="twitter:card" content="summary_large_image" />
+    <meta name="twitter:card" content={twitterCard} />
     <meta name="twitter:title" content={title} />
     <meta name="twitter:description" content={description} />
     <meta name="twitter:image" content={ogImageUrl} />

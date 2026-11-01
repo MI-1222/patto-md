@@ -3,7 +3,6 @@ import remarkParse from 'remark-parse';
 import remarkGfm from 'remark-gfm';
 import remarkRehype from 'remark-rehype';
 import rehypeSlug from 'rehype-slug';
-import rehypeAutolinkHeadings from 'rehype-autolink-headings';
 import rehypePrism from 'rehype-prism-plus/common';
 import rehypeSanitize, { defaultSchema } from 'rehype-sanitize';
 import rehypeStringify from 'rehype-stringify';
