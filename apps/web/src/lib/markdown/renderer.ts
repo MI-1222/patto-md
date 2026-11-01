@@ -270,9 +270,12 @@ const ANCHOR_BLOCK_TAGS = new Set([
  * 左側アンカーボタンを注入するHAST走査プラグイン。
  */
 function rehypeAddLineNumbers() {
-  return (tree: HastRoot) => {
+  return (tree: HastRoot, file?: { value?: unknown }) => {
     /** 重複付与を防止するための採番済みIDセット。 */
     const usedIds = new Set<string>();
+    /** 原本Markdown文字列を行ごとに分割した配列。 */
+    const rawMarkdown = typeof file?.value === 'string' ? file.value : '';
+    const rawLines = rawMarkdown ? rawMarkdown.split(/\r?\n/) : [];
 
     visit(tree, 'element', (node: Element, index, parent) => {
       if (node.tagName === 'pre') {
@@ -297,11 +300,24 @@ function rehypeAddLineNumbers() {
             if (codeLines.length > 0 && node.position?.start?.line) {
               const preStartLine = node.position.start.line;
               const preEndLine = node.position.end?.line ?? preStartLine;
-              /** フェンスコードブロック(` ``` `)の場合は開始タグの次行から採番を開始する。 */
-              const firstLineNumber =
-                preEndLine - preStartLine >= codeLines.length + 1
-                  ? preStartLine + 1
-                  : preStartLine;
+
+              /**
+               * 原本行テキストまたは位置情報の差分からフェンスコードブロック(` ``` ` または `~~~`)かを判定する。
+               * 原本行が存在する場合は先頭のフェンス記号を直接検証し、インデントコードブロックや空行を含む例外ケースでも正確に採番する。
+               */
+              const startLineText =
+                preStartLine >= 1 && preStartLine <= rawLines.length
+                  ? rawLines[preStartLine - 1].trimStart()
+                  : null;
+
+              const isFenced =
+                startLineText !== null
+                  ? /^(`{3,}|~{3,})/.test(startLineText)
+                  : preEndLine - preStartLine >= codeLines.length + 1;
+
+              const firstLineNumber = isFenced
+                ? preStartLine + 1
+                : preStartLine;
 
               codeLines.forEach((lineNode, index) => {
                 const lineNumber = firstLineNumber + index;

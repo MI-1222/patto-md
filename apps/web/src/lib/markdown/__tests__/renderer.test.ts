@@ -134,6 +134,40 @@ const b = 2;
     expect(html).toContain('data-line="8"');
   });
 
+  it('4スペースインデントコードブロックで1行目から正確に原本行番号を採番する。', async () => {
+    const markdown = [
+      '# タイトル', // 1行目
+      '', // 2行目
+      '    const a = 1;', // 3行目 (インデントコードブロック開始)
+      '    const b = 2;', // 4行目
+    ].join('\n');
+
+    const { html } = await renderMarkdown(markdown);
+
+    // インデントコードブロックではフェンス行が存在しないため、コード行が開始行(3行目)から採番される。
+    expect(html).toContain('data-line="3"');
+    expect(html).toContain('id="L3"');
+    expect(html).toContain('data-line="4"');
+    expect(html).toContain('id="L4"');
+  });
+
+  it('チルダフェンス(~~~)コードブロックでフェンス次行から正確に原本行番号を採番する。', async () => {
+    const markdown = [
+      '~~~python', // 1行目
+      'print("hello")', // 2行目
+      'print("world")', // 3行目
+      '~~~', // 4行目
+    ].join('\n');
+
+    const { html } = await renderMarkdown(markdown);
+
+    // チルダフェンスの場合もフェンス次行(2行目)から正しく採番される。
+    expect(html).toContain('data-line="2"');
+    expect(html).toContain('id="L2"');
+    expect(html).toContain('data-line="3"');
+    expect(html).toContain('id="L3"');
+  });
+
   it('悪意あるスクリプトや不正属性をサニタイズして除去する。', async () => {
     const maliciousMarkdown = `
 # タイトル
