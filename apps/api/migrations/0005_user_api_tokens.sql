@@ -3,7 +3,7 @@ CREATE TABLE IF NOT EXISTS user_api_tokens (
     id TEXT PRIMARY KEY,
     user_id TEXT NOT NULL,
     name TEXT NOT NULL,
-    token_hash TEXT NOT NULL UNIQUE,
+    token_hash TEXT NOT NULL,
     scopes TEXT NOT NULL,
     expires_at DATETIME,
     last_used_at DATETIME,
