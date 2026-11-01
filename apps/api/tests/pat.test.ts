@@ -98,6 +98,16 @@ describe('PAT形式判定 (`isPat`)', () => {
       false,
     );
     assert.strictEqual(isPat('pmd_pat_short'), false);
+    // 42文字(1文字不足)
+    assert.strictEqual(
+      isPat('pmd_pat_012345678901234567890123456789012345678901'),
+      false,
+    );
+    // 44文字(1文字超過)
+    assert.strictEqual(
+      isPat('pmd_pat_01234567890123456789012345678901234567890123'),
+      false,
+    );
     assert.strictEqual(
       isPat('pmd_pat_invalid!character!with!special!symbols!123456'),
       false,

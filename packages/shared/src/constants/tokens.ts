@@ -28,7 +28,7 @@ export const MODIFY_TOKEN_PATTERN = /^pt_mod_[A-Za-z0-9_-]{43}$/;
 export const CAPABILITY_TOKEN_PATTERN = /^pt_(edt|mod)_[A-Za-z0-9_-]{43}$/;
 
 /** パーソナルアクセストークン(`PAT`)全体の正規表現パターン。 */
-export const PAT_PATTERN = /^pmd_pat_[A-Za-z0-9]{43,44}$/;
+export const PAT_PATTERN = /^pmd_pat_[A-Za-z0-9]{43}$/;
 
 /** トークンの種別を表す型(`edit` または `modify`)。 */
 export type CapabilityTokenType = 'edit' | 'modify';
