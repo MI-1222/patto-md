@@ -6,3 +6,4 @@ export * from './upload.ts';
 export * from './document.ts';
 export * from './auth.ts';
 export * from './abuse.ts';
+export * from './pat.ts';

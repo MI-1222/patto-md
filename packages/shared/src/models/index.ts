@@ -3,3 +3,4 @@
  */
 
 export * from './document.ts';
+export * from './pat.ts';
