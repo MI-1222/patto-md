@@ -344,11 +344,6 @@ function rehypeAddLineNumbers() {
         const startLine = node.position.start.line;
         const endLine = node.position.end?.line ?? startLine;
 
-        node.properties = node.properties || {};
-        node.properties['data-line-start'] = String(startLine);
-        node.properties['data-line-end'] = String(endLine);
-        node.properties['data-line'] = String(startLine);
-
         const lineId = `L${startLine}`;
         if (!usedIds.has(lineId)) {
           usedIds.add(lineId);
@@ -359,6 +354,7 @@ function rehypeAddLineNumbers() {
          *
          * WHATWG HTML仕様上、`<table>` 直下への `<span>` 挿入による構文崩れを防ぐため、
          * 外側ラッパーにアンカーボタンを配置し、内部をレスポンシブ横スクロールコンテナとする。
+         * 内部の `table` への重複付与を防ぎ、外側ラッパーにのみ行属性とアンカーを持たせる。
          */
         const tableContainerEl: Element = {
           type: 'element',

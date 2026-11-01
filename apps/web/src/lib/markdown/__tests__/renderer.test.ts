@@ -38,6 +38,8 @@ describe('Markdownレンダリングパイプライン(renderMarkdown)', () => {
     expect(html).toContain('data-line="2"');
     expect(html).toContain('id="L2"');
     expect(html).toContain('<table');
+    // 内部の `table` 要素には重複して `data-line` が付与されていないこと。
+    expect(html).not.toMatch(/<table[^>]*data-line=/);
   });
 
   it('箇条書き項目(li)にアンカーを付与し、内部段落(p)との二重化を防止する。', async () => {
