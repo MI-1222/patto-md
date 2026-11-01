@@ -101,7 +101,7 @@ export function DropZone({
           PNG / JPEG / WebP / GIF / SVG
         </span>
         <span className="rounded border border-neutral-800 bg-neutral-900/80 px-2 py-0.5">
-          単一最大 10MB
+          画像最大 25MB (その他 10MB)
         </span>
         <span className="rounded border border-neutral-800 bg-neutral-900/80 px-2 py-0.5">
           合計最大 30MB

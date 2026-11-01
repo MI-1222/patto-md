@@ -17,6 +17,7 @@ import {
   type ExistingAttachmentItem,
 } from '../../lib/api/update';
 import { renderMarkdown } from '../../lib/markdown';
+import { renderAllMermaidBlocks, loadPele } from '../../lib/mermaid';
 import { TurnstileWidget } from '../turnstile';
 import { EditIcon, KeyIcon, TrashIcon, CloudUploadSvg } from '../svg';
 
@@ -65,6 +66,8 @@ export const DocumentEditContainer: FC<DocumentEditContainerProps> = ({
   const [turnstileToken, setTurnstileToken] = useState<string>('');
 
   const fileInputRef = useRef<HTMLInputElement>(null);
+  /** リアルタイムプレビューDOM要素への参照。 */
+  const previewContainerRef = useRef<HTMLDivElement>(null);
 
   /** 未保存変更が存在するかどうかの判定フラグ。 */
   const isDirty =
@@ -114,6 +117,16 @@ export const DocumentEditContainer: FC<DocumentEditContainerProps> = ({
       clearTimeout(timer);
     };
   }, [markdownContent, apiBaseUrl]);
+
+  useEffect(() => {
+    void loadPele();
+  }, []);
+
+  useEffect(() => {
+    if (previewContainerRef.current) {
+      void renderAllMermaidBlocks(previewContainerRef.current);
+    }
+  }, [previewHtml, activeTab]);
 
   /** 手動入力された認可トークンを検証・保存して適用するハンドラー。 */
   const handleApplyManualToken = useCallback(() => {
@@ -246,6 +259,8 @@ export const DocumentEditContainer: FC<DocumentEditContainerProps> = ({
         markdownContent,
         existingAttachments,
         newFiles,
+        expiresAt: initialDocument.expiresAt,
+        createdAt: initialDocument.createdAt,
         turnstileToken: turnstileToken || undefined,
         baseUrl: apiBaseUrl,
         onProgress: (p) => {
@@ -575,7 +590,10 @@ export const DocumentEditContainer: FC<DocumentEditContainerProps> = ({
             </span>
           </div>
 
-          <div className="min-h-125 rounded-xl border border-neutral-800 bg-neutral-900/40 p-6 backdrop-blur-sm">
+          <div
+            ref={previewContainerRef}
+            className="min-h-125 rounded-xl border border-neutral-800 bg-neutral-900/40 p-6 backdrop-blur-sm"
+          >
             <h1 className="mb-6 border-b border-neutral-800 pb-4 text-2xl font-bold tracking-tight text-neutral-100">
               {title || '無題のドキュメント'}
             </h1>

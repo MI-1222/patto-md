@@ -1,6 +1,7 @@
 import { z } from 'zod';
 import {
   ALLOWED_MIME_TYPES,
+  EXPIRATION_PRESETS,
   MAX_SINGLE_FILE_SIZE,
   MAX_TOTAL_FILE_SIZE,
 } from '../constants/limits.ts';
@@ -47,6 +48,13 @@ export const uploadSignRequestSchema = z.object({
         message: `合計ファイルサイズは最大${MAX_TOTAL_FILE_SIZE / (1024 * 1024)}MBまでである。`,
       },
     ),
+
+  /** 有効期限プリセット指定(任意)。未指定時は既定の有効期限が適用される。 */
+  expiration: z
+    .enum(EXPIRATION_PRESETS, {
+      error: '無効な有効期限の指定。',
+    })
+    .optional(),
 });
 
 /** R2 Presigned PUT 署名発行要求の型。 */

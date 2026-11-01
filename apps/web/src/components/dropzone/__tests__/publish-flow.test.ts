@@ -166,6 +166,7 @@ describe('Direct Uploadとコミットパイプラインの統合フロー検証
     expect(commitResult.url).toBe('/p/testSlug123');
     expect(commitResult.title).toBe('システム仕様書');
 
+    expect(progressLogs.some((p) => p.stage === 'optimizing')).toBe(true);
     expect(progressLogs.some((p) => p.stage === 'signing')).toBe(true);
     expect(progressLogs.some((p) => p.stage === 'uploading')).toBe(true);
     expect(progressLogs.some((p) => p.stage === 'committing')).toBe(true);
@@ -620,6 +621,164 @@ describe('Direct Uploadとコミットパイプラインの統合フロー検証
       expect(
         (capturedSignHeaders as Record<string, string>)['x-turnstile-token'],
       ).toBe('test-turnstile-token-value');
+    });
+
+    it('ブラウザCanvas API対応環境において画像がWebPへ事前圧縮され、Markdown内の参照URLがWebP拡張子へ置換されてコミットされること。', async () => {
+      const originalCreateImageBitmap = globalThis.createImageBitmap;
+      const originalOffscreenCanvas = globalThis.OffscreenCanvas;
+
+      const mockBitmapClose = vi.fn();
+      globalThis.createImageBitmap = vi.fn().mockResolvedValue({
+        width: 3840,
+        height: 2160,
+        close: mockBitmapClose,
+      } as unknown as ImageBitmap);
+
+      class MockOffscreenCanvas {
+        constructor(
+          public width: number,
+          public height: number,
+        ) {}
+        getContext() {
+          return { drawImage: vi.fn() };
+        }
+        convertToBlob = vi
+          .fn()
+          .mockResolvedValue(
+            new Blob(['compressed-webp'], { type: 'image/webp' }),
+          );
+      }
+      globalThis.OffscreenCanvas =
+        MockOffscreenCanvas as unknown as typeof OffscreenCanvas;
+
+      try {
+        const mdContent = '# 最適化検証\n![写真](images/large-photo.png)';
+        const markdownVirtualFile: VirtualFile = {
+          file: new File([mdContent], 'test.md', { type: 'text/markdown' }),
+          relativePath: 'test.md',
+          isSizeExceeded: false,
+          isTypeUnsupported: false,
+        };
+
+        const assetFiles = new Map<string, VirtualFile>([
+          [
+            'images/large-photo.png',
+            {
+              file: new File([new Uint8Array(200000)], 'large-photo.png', {
+                type: 'image/png',
+              }),
+              relativePath: 'images/large-photo.png',
+              isSizeExceeded: false,
+              isTypeUnsupported: false,
+            },
+          ],
+        ]);
+
+        const parsedFiles: ParsedFiles = {
+          markdownFile: markdownVirtualFile,
+          assetFiles,
+          totalSize: 200000,
+          isTotalSizeExceeded: false,
+          hasInvalidFiles: false,
+        };
+
+        const parseResult = await parseMarkdown(mdContent);
+        const reconciliation = reconcileAssets(
+          parseResult.imageRefs,
+          assetFiles,
+        );
+
+        let signedFileName = '';
+        let putBodyMime = '';
+        let replacedMarkdownText = '';
+
+        globalThis.fetch = vi
+          .fn()
+          .mockImplementation(async (url: string, init?: RequestInit) => {
+            if (url.includes('/api/upload/sign')) {
+              const body = JSON.parse(init?.body as string);
+              signedFileName = body.files[0].name;
+              return {
+                ok: true,
+                status: 200,
+                json: async () => ({
+                  files: [
+                    {
+                      fileId: 'photo-uuid',
+                      fileName: body.files[0].name,
+                      r2Key: `exp-7d/uploads/uuid/${body.files[0].name}`,
+                      uploadUrl: 'https://r2.example.com/put-photo',
+                    },
+                    {
+                      fileId: 'md-uuid',
+                      fileName: 'test.md',
+                      r2Key: 'exp-7d/uploads/uuid/test.md',
+                      uploadUrl: 'https://r2.example.com/put-md',
+                    },
+                  ],
+                }),
+              } as Response;
+            }
+
+            if (url === 'https://r2.example.com/put-photo') {
+              putBodyMime = (init?.headers as Record<string, string>)[
+                'Content-Type'
+              ];
+              return { ok: true, status: 200 } as Response;
+            }
+
+            if (url === 'https://r2.example.com/put-md') {
+              const bodyBlob = init?.body as Blob;
+              replacedMarkdownText = await bodyBlob.text();
+              return { ok: true, status: 200 } as Response;
+            }
+
+            if (url.includes('/api/documents')) {
+              return {
+                ok: true,
+                status: 201,
+                json: async () => ({
+                  id: 'webpDoc',
+                  url: '/p/webpDoc',
+                  title: '最適化検証',
+                  editToken: 'token',
+                  modifyToken: 'modToken',
+                  expiresAt: '2026-11-07T00:00:00.000Z',
+                  createdAt: '2026-10-31T00:00:00.000Z',
+                }),
+              } as Response;
+            }
+
+            return { ok: false, status: 404 } as Response;
+          });
+
+        const progressHistory: string[] = [];
+        await executePublishPipeline({
+          parsedFiles,
+          reconciliation,
+          parseResult,
+          markdownContent: mdContent,
+          expiration: '7days',
+          onProgress: (p) => {
+            progressHistory.push(p.stage);
+          },
+        });
+
+        // 最適化後のファイル名が `.webp` に変更されていること。
+        expect(signedFileName).toBe('large-photo.webp');
+        // R2 PUTヘッダーのMIMEタイプが `image/webp` であること。
+        expect(putBodyMime).toBe('image/webp');
+        // Markdown本文内の参照URLがWebPのR2パスに置換されていること。
+        expect(replacedMarkdownText).toContain(
+          '/api/assets/exp-7d/uploads/uuid/large-photo.webp',
+        );
+        // `optimizing` ステージが通過していること。
+        expect(progressHistory).toContain('optimizing');
+        expect(mockBitmapClose).toHaveBeenCalled();
+      } finally {
+        globalThis.createImageBitmap = originalCreateImageBitmap;
+        globalThis.OffscreenCanvas = originalOffscreenCanvas;
+      }
     });
   });
 });

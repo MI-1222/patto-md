@@ -145,6 +145,52 @@ describe('APIクライアント(src/lib/api/client.ts)', () => {
         requestUploadSign(items, 'http://localhost:8787'),
       ).rejects.toThrow('ファイルメタデータの検証に失敗しました。');
     });
+
+    it('有効期限プリセットが指定された場合、リクエストボディに含めて送信する。', async () => {
+      const mockResponse: UploadSignResponse = {
+        files: [
+          {
+            fileId: 'mock-uuid-1',
+            fileName: 'test.png',
+            r2Key: 'exp-1d/uploads/mock-uuid-1/test.png',
+            uploadUrl: 'https://r2.example.com/put-url',
+          },
+        ],
+      };
+
+      const fetchMock = vi.fn().mockResolvedValue({
+        ok: true,
+        status: 200,
+        json: async () => mockResponse,
+      } as Response);
+      globalThis.fetch = fetchMock;
+
+      const items: UploadSignFileItem[] = [
+        { name: 'test.png', size: 1024, type: 'image/png' },
+      ];
+
+      const result = await requestUploadSign(
+        items,
+        'http://localhost:8787',
+        undefined,
+        '1day',
+      );
+
+      expect(fetchMock).toHaveBeenCalledWith(
+        'http://localhost:8787/api/upload/sign',
+        {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify({
+            files: items,
+            expiration: '1day',
+          }),
+        },
+      );
+      expect(result).toEqual(mockResponse);
+    });
   });
 
   describe('uploadToR2', () => {

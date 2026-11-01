@@ -2,6 +2,7 @@ import {
   MAX_TOTAL_FILE_SIZE,
   type DocumentAttachmentCommit,
   type DocumentUpdateResponse,
+  type ExpirationPreset,
   type UploadSignFileItem,
   type UploadSignFileResponseItem,
 } from '@patto-md/shared';
@@ -14,12 +15,17 @@ import {
   reconcileAssets,
   type ResolvedAsset,
 } from '../markdown';
+import {
+  compressImagesConcurrently,
+  type CompressedImageResult,
+  MAX_RAW_TOTAL_FILE_SIZE,
+} from '../storage';
 import { resolveFileMimeType } from './publish';
 
 /** 更新パイプラインの進行進捗情報の定義。 */
 export interface UpdateProgressInfo {
   /** 進行ステージ。 */
-  stage: 'signing' | 'uploading' | 'committing';
+  stage: 'optimizing' | 'signing' | 'uploading' | 'committing';
   /** 完了件数。 */
   current: number;
   /** 全体件数。 */
@@ -58,6 +64,12 @@ export interface ExecuteUpdatePipelineParams {
   existingAttachments: ExistingAttachmentItem[];
   /** 新規に追加された画像ファイル群。 */
   newFiles?: File[];
+  /** 有効期限プリセット(任意)。未指定時は既存アセットまたはドキュメント日時から逆引き判定される。 */
+  expiration?: ExpirationPreset;
+  /** 有効期限日時(任意、既存添付ファイル無しの際の判定フォールバック用)。 */
+  expiresAt?: string | null;
+  /** 作成日時(任意、既存添付ファイル無しの際の判定フォールバック用)。 */
+  createdAt?: string;
   /** 未解決画像のリンク切れ更新を容認するかどうかの真偽値。 */
   allowIncompletePublish?: boolean;
   /** Cloudflare Turnstile ボット検証トークン。 */
@@ -66,6 +78,70 @@ export interface ExecuteUpdatePipelineParams {
   baseUrl?: string;
   /** 進捗コールバックハンドラー。 */
   onProgress?: (progress: UpdateProgressInfo) => void;
+}
+
+/**
+ * ドキュメント更新時に適用すべき有効期限プリセットを判定・解決する。
+ *
+ * 以下の優先順位で解決する：
+ * 1. 明示的に指定された有効期限プリセット (`explicitExpiration`)。
+ * 2. 既存添付ファイル群の `r2Key` プレフィックス (`exp-1d/`, `exp-7d/`, `exp-30d/`, `permanent/`)。
+ * 3. ドキュメントの有効期限日時 (`expiresAt`) と作成日時 (`createdAt`) の差分時間。
+ * 4. いずれも判定できない場合は `undefined`。
+ *
+ * @param params - 判定パラメータ。
+ * @returns 解決された有効期限プリセット、または undefined。
+ */
+export function resolveUpdateExpiration(params: {
+  explicitExpiration?: ExpirationPreset;
+  existingAttachments?: ExistingAttachmentItem[];
+  expiresAt?: string | null;
+  createdAt?: string;
+}): ExpirationPreset | undefined {
+  if (params.explicitExpiration) {
+    return params.explicitExpiration;
+  }
+
+  if (params.existingAttachments && params.existingAttachments.length > 0) {
+    const sampleKey = params.existingAttachments[0].r2Key;
+    if (sampleKey.startsWith('exp-1d/')) {
+      return '1day';
+    }
+    if (sampleKey.startsWith('exp-7d/')) {
+      return '7days';
+    }
+    if (sampleKey.startsWith('exp-30d/')) {
+      return '30days';
+    }
+    if (sampleKey.startsWith('permanent/')) {
+      return 'never';
+    }
+  }
+
+  if (params.expiresAt === null) {
+    return 'never';
+  }
+
+  if (params.expiresAt && params.createdAt) {
+    const expiresTime = new Date(params.expiresAt).getTime();
+    const createdTime = new Date(params.createdAt).getTime();
+    if (
+      !Number.isNaN(expiresTime) &&
+      !Number.isNaN(createdTime) &&
+      expiresTime > createdTime
+    ) {
+      const diffHours = (expiresTime - createdTime) / (1000 * 60 * 60);
+      if (diffHours <= 36) {
+        return '1day';
+      }
+      if (diffHours <= 14 * 24) {
+        return '7days';
+      }
+      return '30days';
+    }
+  }
+
+  return undefined;
 }
 
 /**
@@ -106,13 +182,12 @@ export async function executeUpdatePipeline(
     throw new Error('Markdown本文が入力されていません。');
   }
 
-  /** 既存添付ファイルと新規追加ファイルの合計サイズ(バイト)。 */
-  const totalAttachmentSize =
-    existingAttachments.reduce((sum, att) => sum + att.fileSize, 0) +
-    newFiles.reduce((sum, file) => sum + file.size, 0);
-
-  if (totalAttachmentSize > MAX_TOTAL_FILE_SIZE) {
-    throw new Error('添付ファイルの合計サイズが上限(30MB)を超過しています。');
+  /** 新規追加ファイルの生サイズ合計が安全上限(100MB)を超過していないかの事前検証。 */
+  const rawNewFilesSize = newFiles.reduce((sum, file) => sum + file.size, 0);
+  if (rawNewFilesSize > MAX_RAW_TOTAL_FILE_SIZE) {
+    throw new Error(
+      '追加ファイルの生合計サイズが上限(100MB)を超過しています。',
+    );
   }
 
   /** Markdown構文木の解析結果。 */
@@ -156,23 +231,82 @@ export async function executeUpdatePipeline(
     }
   }
 
+  const totalAssets = uniqueResolvedAssets.length;
+  /** 新規追加画像の圧縮・最適化結果マップ。 */
+  const compressedAssetMap = new Map<string, CompressedImageResult>();
+
+  if (totalAssets > 0) {
+    onProgress?.({
+      stage: 'optimizing',
+      current: 0,
+      total: totalAssets,
+      message: `画像を最適化中 (0/${totalAssets})...`,
+      percent: 5,
+    });
+
+    const compressionResults = await compressImagesConcurrently(
+      uniqueResolvedAssets.map((asset) => asset.file),
+      {
+        concurrency: 2,
+        onProgress: (current, total) => {
+          const percent = 5 + Math.floor((current / total) * 15);
+          onProgress?.({
+            stage: 'optimizing',
+            current,
+            total,
+            message: `画像を最適化中 (${current}/${total})...`,
+            percent,
+          });
+        },
+      },
+    );
+
+    for (let i = 0; i < totalAssets; i++) {
+      compressedAssetMap.set(
+        uniqueResolvedAssets[i].relativePath,
+        compressionResults[i],
+      );
+    }
+  }
+
+  /** 既存添付ファイルと最適化後新規添付ファイルの最終合計サイズ(バイト)。 */
+  const finalTotalAttachmentSize =
+    existingAttachments.reduce((sum, att) => sum + att.fileSize, 0) +
+    uniqueResolvedAssets.reduce((sum, asset) => {
+      const comp = compressedAssetMap.get(asset.relativePath);
+      return sum + (comp ? comp.size : asset.file.size);
+    }, 0);
+
+  if (finalTotalAttachmentSize > MAX_TOTAL_FILE_SIZE) {
+    throw new Error('添付ファイルの合計サイズが上限(30MB)を超過しています。');
+  }
+
   onProgress?.({
     stage: 'signing',
     current: 0,
     total: uniqueResolvedAssets.length + 1,
     message: '署名を発行中...',
-    percent: 10,
+    percent: 25,
   });
 
   /** 新規画像群および更新後本文Markdownの一括署名発行アイテムリスト。 */
   const fileSignItems: UploadSignFileItem[] = [
     ...uniqueResolvedAssets.map((asset) => {
-      const fileName =
+      const compressed = compressedAssetMap.get(asset.relativePath);
+      const fallbackName =
         getBasename(asset.relativePath) || asset.file.name || 'image';
+      const fileName = compressed ? compressed.fileName : fallbackName;
+      const fileSize = compressed ? compressed.size : asset.file.size;
+      const mimeType = (
+        compressed?.wasCompressed
+          ? compressed.mimeType
+          : resolveFileMimeType(asset.file)
+      ) as UploadSignFileItem['type'];
+
       return {
         name: fileName,
-        size: asset.file.size,
-        type: resolveFileMimeType(asset.file),
+        size: fileSize,
+        type: mimeType,
       };
     }),
     {
@@ -182,10 +316,19 @@ export async function executeUpdatePipeline(
     },
   ];
 
+  /** 明示指定・既存添付ファイル・日時から判定した有効期限プリセット。 */
+  const resolvedExpiration = resolveUpdateExpiration({
+    explicitExpiration: params.expiration,
+    existingAttachments,
+    expiresAt: params.expiresAt,
+    createdAt: params.createdAt,
+  });
+
   const signResponse = await requestUploadSign(
     fileSignItems,
     baseUrl,
     turnstileToken,
+    resolvedExpiration,
   );
   const signedFiles = signResponse.files;
 
@@ -228,11 +371,15 @@ export async function executeUpdatePipeline(
   }[] = [
     ...uniqueResolvedAssets.map((asset) => {
       const sign = assetSignMap.get(asset.relativePath)!;
-      const mimeType = resolveFileMimeType(asset.file);
+      const compressed = compressedAssetMap.get(asset.relativePath);
+      const body = compressed ? compressed.blob : asset.file;
+      const mimeType = compressed?.wasCompressed
+        ? compressed.mimeType
+        : resolveFileMimeType(asset.file);
       return {
         name: sign.fileName,
         uploadUrl: sign.uploadUrl,
-        body: asset.file,
+        body,
         mimeType,
       };
     }),
@@ -282,11 +429,16 @@ export async function executeUpdatePipeline(
   const newlyUploadedAttachments: DocumentAttachmentCommit[] =
     uniqueResolvedAssets.map((asset) => {
       const sign = assetSignMap.get(asset.relativePath)!;
+      const compressed = compressedAssetMap.get(asset.relativePath);
+      const fileSize = compressed ? compressed.size : asset.file.size;
+      const mimeType = compressed?.wasCompressed
+        ? compressed.mimeType
+        : resolveFileMimeType(asset.file);
       return {
         id: sign.fileId,
         fileName: sign.fileName,
-        fileSize: asset.file.size,
-        mimeType: resolveFileMimeType(asset.file),
+        fileSize,
+        mimeType,
         r2Key: sign.r2Key,
       };
     });

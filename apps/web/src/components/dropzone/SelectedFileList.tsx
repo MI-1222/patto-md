@@ -239,13 +239,13 @@ export function SelectedFileList({
           <p className="font-semibold">一部のファイルに問題があります。</p>
           <ul className="mt-1 list-inside list-disc space-y-0.5 text-red-400/90">
             {isTotalSizeExceeded && (
-              <li>全体の合計サイズが30MBを超過しています。</li>
+              <li>全体の合計サイズが上限を超過しています。</li>
             )}
             {markdownFile?.isSizeExceeded && (
-              <li>Markdownファイルのサイズが10MBを超過しています。</li>
+              <li>Markdownファイルのサイズが上限(10MB)を超過しています。</li>
             )}
             {assetList.some((f) => f.isSizeExceeded) && (
-              <li>単一ファイルサイズが10MBを超過している画像があります。</li>
+              <li>単一ファイルサイズの上限を超過している画像があります。</li>
             )}
             {assetList.some((f) => f.isTypeUnsupported) && (
               <li>サポートされていない形式のファイルが含まれています。</li>
@@ -386,7 +386,7 @@ export function SelectedFileList({
                       <div className="flex shrink-0 items-center gap-2 pl-2">
                         {asset.isSizeExceeded && (
                           <span className="rounded bg-red-900/60 px-1.5 py-0.5 text-[10px] text-red-300">
-                            10MB超過
+                            サイズ超過
                           </span>
                         )}
                         {asset.isTypeUnsupported && (

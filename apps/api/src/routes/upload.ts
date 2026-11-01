@@ -59,7 +59,7 @@ uploadRouter.post(
       );
     }
 
-    const { files } = parseResult.data;
+    const { files, expiration = '7days' } = parseResult.data;
 
     // 署名生成に必要な環境変数の存在確認。
     const accountId = c.env.CLOUDFLARE_ACCOUNT_ID;
@@ -86,7 +86,7 @@ uploadRouter.post(
       const signedFiles: UploadSignFileResponseItem[] = await Promise.all(
         files.map(async (file) => {
           const fileId = crypto.randomUUID();
-          const r2Key = generateR2Key(fileId, file.name);
+          const r2Key = generateR2Key(fileId, file.name, expiration);
 
           const uploadUrl = await createPresignedPutUrl({
             accountId,

@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
-import { executeUpdatePipeline } from '../update';
+import { executeUpdatePipeline, resolveUpdateExpiration } from '../update';
 import { updateDocument } from '../client';
 import type {
   UploadSignResponse,
@@ -105,6 +105,7 @@ describe('ドキュメント更新パイプラインの統合テスト', () => {
         return new Response('Not Found', { status: 404 });
       });
 
+    const progressStages: string[] = [];
     const result = await executeUpdatePipeline({
       documentId,
       token,
@@ -113,10 +114,18 @@ describe('ドキュメント更新パイプラインの統合テスト', () => {
       existingAttachments,
       newFiles,
       baseUrl: 'https://api.example.com',
+      onProgress: (p) => {
+        progressStages.push(p.stage);
+      },
     });
 
     expect(result.id).toBe(documentId);
     expect(result.title).toBe(updatedTitle);
+
+    expect(progressStages).toContain('optimizing');
+    expect(progressStages).toContain('signing');
+    expect(progressStages).toContain('uploading');
+    expect(progressStages).toContain('committing');
 
     // 新規画像1件 + Markdown本文1件 = 合計2件のDirect PUTが実行されたこと。
     expect(putCalls.length).toBe(2);
@@ -300,5 +309,250 @@ describe('updateDocument クライアントAPI関数の検証', () => {
         'https://api.example.com',
       ),
     ).rejects.toThrow('更新権限がありません。');
+  });
+});
+
+describe('resolveUpdateExpiration 有効期限判定関数の検証', () => {
+  it('明示的な指定がある場合は最優先でその値を返すこと', () => {
+    const result = resolveUpdateExpiration({
+      explicitExpiration: '30days',
+      existingAttachments: [
+        {
+          id: '1',
+          fileName: 'img.png',
+          fileSize: 100,
+          mimeType: 'image/png',
+          r2Key: 'exp-1d/uploads/uuid/img.png',
+        },
+      ],
+      expiresAt: null,
+    });
+    expect(result).toBe('30days');
+  });
+
+  it('既存添付ファイルがある場合はそのキーのプレフィックスから判定すること', () => {
+    expect(
+      resolveUpdateExpiration({
+        existingAttachments: [
+          {
+            id: '1',
+            fileName: 'img.png',
+            fileSize: 100,
+            mimeType: 'image/png',
+            r2Key: 'exp-1d/uploads/uuid/img.png',
+          },
+        ],
+      }),
+    ).toBe('1day');
+
+    expect(
+      resolveUpdateExpiration({
+        existingAttachments: [
+          {
+            id: '2',
+            fileName: 'img.png',
+            fileSize: 100,
+            mimeType: 'image/png',
+            r2Key: 'exp-7d/uploads/uuid/img.png',
+          },
+        ],
+      }),
+    ).toBe('7days');
+
+    expect(
+      resolveUpdateExpiration({
+        existingAttachments: [
+          {
+            id: '3',
+            fileName: 'img.png',
+            fileSize: 100,
+            mimeType: 'image/png',
+            r2Key: 'exp-30d/uploads/uuid/img.png',
+          },
+        ],
+      }),
+    ).toBe('30days');
+
+    expect(
+      resolveUpdateExpiration({
+        existingAttachments: [
+          {
+            id: '4',
+            fileName: 'img.png',
+            fileSize: 100,
+            mimeType: 'image/png',
+            r2Key: 'permanent/uploads/uuid/img.png',
+          },
+        ],
+      }),
+    ).toBe('never');
+  });
+
+  it('既存添付ファイルがなく expiresAt が null の場合は never を返すこと', () => {
+    const result = resolveUpdateExpiration({
+      existingAttachments: [],
+      expiresAt: null,
+      createdAt: '2026-10-31T00:00:00.000Z',
+    });
+    expect(result).toBe('never');
+  });
+
+  it('既存添付ファイルがなく expiresAt と createdAt の差分からプリセットを判定すること', () => {
+    // 1日 (24時間)
+    expect(
+      resolveUpdateExpiration({
+        existingAttachments: [],
+        createdAt: '2026-10-31T00:00:00.000Z',
+        expiresAt: '2026-11-01T00:00:00.000Z',
+      }),
+    ).toBe('1day');
+
+    // 7日
+    expect(
+      resolveUpdateExpiration({
+        existingAttachments: [],
+        createdAt: '2026-10-31T00:00:00.000Z',
+        expiresAt: '2026-11-07T00:00:00.000Z',
+      }),
+    ).toBe('7days');
+
+    // 30日
+    expect(
+      resolveUpdateExpiration({
+        existingAttachments: [],
+        createdAt: '2026-10-31T00:00:00.000Z',
+        expiresAt: '2026-11-30T00:00:00.000Z',
+      }),
+    ).toBe('30days');
+  });
+
+  it('有効期限の判定材料がない場合は undefined を返すこと', () => {
+    expect(resolveUpdateExpiration({})).toBeUndefined();
+    expect(
+      resolveUpdateExpiration({
+        existingAttachments: [
+          {
+            id: 'legacy',
+            fileName: 'img.png',
+            fileSize: 100,
+            mimeType: 'image/png',
+            r2Key: 'temp/uploads/uuid/img.png',
+          },
+        ],
+      }),
+    ).toBeUndefined();
+  });
+
+  it('Canvas APIモック環境下で新規追加画像がWebPへ圧縮され、更新コミットされること。', async () => {
+    const originalCreateImageBitmap = globalThis.createImageBitmap;
+    const originalOffscreenCanvas = globalThis.OffscreenCanvas;
+
+    const mockBitmapClose = vi.fn();
+    globalThis.createImageBitmap = vi.fn().mockResolvedValue({
+      width: 3000,
+      height: 2000,
+      close: mockBitmapClose,
+    } as unknown as ImageBitmap);
+
+    class MockOffscreenCanvas {
+      constructor(
+        public width: number,
+        public height: number,
+      ) {}
+      getContext() {
+        return { drawImage: vi.fn() };
+      }
+      convertToBlob = vi
+        .fn()
+        .mockResolvedValue(
+          new Blob(['compressed-webp-bytes'], { type: 'image/webp' }),
+        );
+    }
+    globalThis.OffscreenCanvas =
+      MockOffscreenCanvas as unknown as typeof OffscreenCanvas;
+
+    try {
+      const documentId = 'webp-update-test';
+      const token = 'token';
+      const newFiles = [
+        new File([new Uint8Array(100000)], 'screen.png', {
+          type: 'image/png',
+        }),
+      ];
+
+      let signedFileName = '';
+      let updateAttachments: unknown[] = [];
+
+      globalThis.fetch = vi
+        .fn()
+        .mockImplementation(async (url: string, init?: RequestInit) => {
+          if (url.includes('/api/upload/sign')) {
+            const body = JSON.parse(init?.body as string);
+            signedFileName = body.files[0].name;
+            return new Response(
+              JSON.stringify({
+                files: [
+                  {
+                    fileId: 'new-id',
+                    fileName: body.files[0].name,
+                    r2Key: `exp-7d/uploads/uuid/${body.files[0].name}`,
+                    uploadUrl: 'https://r2.example.com/put-new',
+                  },
+                  {
+                    fileId: 'md-id',
+                    fileName: 'content.md',
+                    r2Key: 'exp-7d/uploads/uuid/content.md',
+                    uploadUrl: 'https://r2.example.com/put-md',
+                  },
+                ],
+              }),
+              { status: 200, headers: { 'Content-Type': 'application/json' } },
+            );
+          }
+
+          if (url.startsWith('https://r2.example.com/put-')) {
+            return new Response(null, { status: 200 });
+          }
+
+          if (url.includes(`/api/documents/${documentId}`)) {
+            const body = JSON.parse(init?.body as string);
+            updateAttachments = body.attachments;
+            return new Response(
+              JSON.stringify({
+                id: documentId,
+                url: `/p/${documentId}`,
+                title: '更新タイトル',
+                visibility: 'public',
+                description: '更新タイトル',
+                expiresAt: '2026-11-07T00:00:00.000Z',
+                createdAt: '2026-10-31T00:00:00.000Z',
+                updatedAt: '2026-10-31T12:00:00.000Z',
+              }),
+              { status: 200, headers: { 'Content-Type': 'application/json' } },
+            );
+          }
+
+          return new Response('Not Found', { status: 404 });
+        });
+
+      await executeUpdatePipeline({
+        documentId,
+        token,
+        title: '更新タイトル',
+        markdownContent: '# 更新\n![画像](screen.png)',
+        existingAttachments: [],
+        newFiles,
+      });
+
+      expect(signedFileName).toBe('screen.webp');
+      expect(updateAttachments.length).toBe(1);
+      expect((updateAttachments[0] as { fileName: string }).fileName).toBe(
+        'screen.webp',
+      );
+      expect(mockBitmapClose).toHaveBeenCalled();
+    } finally {
+      globalThis.createImageBitmap = originalCreateImageBitmap;
+      globalThis.OffscreenCanvas = originalOffscreenCanvas;
+    }
   });
 });

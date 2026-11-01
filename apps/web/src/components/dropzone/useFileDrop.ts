@@ -1,10 +1,15 @@
 import { useEffect, useRef, useState, useCallback } from 'react';
 import {
   MAX_SINGLE_FILE_SIZE,
-  MAX_TOTAL_FILE_SIZE,
   ALLOWED_IMAGE_MIME_TYPES,
   ALLOWED_TEXT_MIME_TYPES,
 } from '@patto-md/shared';
+import {
+  shouldSkipCompression,
+  MAX_RAW_IMAGE_FILE_SIZE,
+  estimateCompressedSize,
+  isTotalFileSizeExceeded,
+} from '../../lib/storage';
 import type { VirtualFile, ParsedFiles, DropZoneStatus } from './types';
 
 /**
@@ -41,6 +46,35 @@ function isSupportedImage(file: File): boolean {
   const extension = file.name.toLowerCase().split('.').pop();
   const validExtensions = ['png', 'jpg', 'jpeg', 'gif', 'webp', 'svg'];
   return extension ? validExtensions.includes(extension) : false;
+}
+
+/**
+ * ファイルが単一ファイルの許容サイズを超過しているかを判定する。
+ *
+ * 圧縮対象の静止画像 (PNGやJPEG等) はクライアント側でWebP変換 (品質0.8、長辺1920px) され、
+ * ファイルサイズが大幅に縮小されるため、生ファイルとして25MB (`MAX_RAW_IMAGE_FILE_SIZE`) まで許容する。
+ * スキップ対象 (SVGやGIF) およびMarkdownファイルは原本のまま保存されるため、10MB (`MAX_SINGLE_FILE_SIZE`) 制限を維持する。
+ *
+ * @param file - 判定対象ファイル。
+ * @param isMd - Markdownファイル判定結果。
+ * @param isImg - サポート対象画像判定結果。
+ * @returns 許容上限を超過している場合は `true`、許容範囲内の場合は `false`。
+ */
+function isFileSizeExceeded(
+  file: File,
+  isMd: boolean,
+  isImg: boolean,
+): boolean {
+  if (isMd) {
+    return file.size > MAX_SINGLE_FILE_SIZE;
+  }
+  if (isImg) {
+    if (shouldSkipCompression(file)) {
+      return file.size > MAX_SINGLE_FILE_SIZE;
+    }
+    return file.size > MAX_RAW_IMAGE_FILE_SIZE;
+  }
+  return file.size > MAX_SINGLE_FILE_SIZE;
 }
 
 /** WebKit/Blink ファイルシステムエントリの型定義。 */
@@ -212,15 +246,17 @@ export function useFileDrop() {
       let primaryMarkdown: VirtualFile | null = null;
       const assetMap = new Map<string, VirtualFile>();
       let totalBytes = 0;
+      let estimatedTotalBytes = 0;
       let hasError = false;
 
       for (const item of rawFiles) {
         const { file, relativePath } = item;
         totalBytes += file.size;
+        estimatedTotalBytes += estimateCompressedSize(file);
 
-        const isSizeOver = file.size > MAX_SINGLE_FILE_SIZE;
         const isMd = isMarkdownFile(file);
         const isImg = isSupportedImage(file);
+        const isSizeOver = isFileSizeExceeded(file, isMd, isImg);
         const isTypeUnsupported = !isMd && !isImg;
 
         if (isSizeOver || isTypeUnsupported) {
@@ -241,7 +277,10 @@ export function useFileDrop() {
         }
       }
 
-      const isTotalOver = totalBytes > MAX_TOTAL_FILE_SIZE;
+      const isTotalOver = isTotalFileSizeExceeded(
+        totalBytes,
+        estimatedTotalBytes,
+      );
       if (isTotalOver) {
         hasError = true;
       }
@@ -276,9 +315,9 @@ export function useFileDrop() {
 
         for (const item of additionalRawFiles) {
           const { file, relativePath } = item;
-          const isSizeOver = file.size > MAX_SINGLE_FILE_SIZE;
           const isMd = isMarkdownFile(file);
           const isImg = isSupportedImage(file);
+          const isSizeOver = isFileSizeExceeded(file, isMd, isImg);
           const isTypeUnsupported = !isMd && !isImg;
 
           const virtualFile: VirtualFile = {
@@ -297,18 +336,25 @@ export function useFileDrop() {
 
         // 合計サイズおよびエラー状態の再計算。
         let totalBytes = primaryMarkdown ? primaryMarkdown.file.size : 0;
+        let estimatedTotalBytes = primaryMarkdown
+          ? estimateCompressedSize(primaryMarkdown.file)
+          : 0;
         let hasError = primaryMarkdown
           ? primaryMarkdown.isSizeExceeded || primaryMarkdown.isTypeUnsupported
           : false;
 
         for (const asset of nextAssetMap.values()) {
           totalBytes += asset.file.size;
+          estimatedTotalBytes += estimateCompressedSize(asset.file);
           if (asset.isSizeExceeded || asset.isTypeUnsupported) {
             hasError = true;
           }
         }
 
-        const isTotalOver = totalBytes > MAX_TOTAL_FILE_SIZE;
+        const isTotalOver = isTotalFileSizeExceeded(
+          totalBytes,
+          estimatedTotalBytes,
+        );
         if (isTotalOver) {
           hasError = true;
         }

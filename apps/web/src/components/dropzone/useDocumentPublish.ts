@@ -16,11 +16,15 @@ import type {
 } from '../../lib/markdown';
 import type { ParsedFiles } from './types';
 
-/**
- * アップロードおよびコミット処理の進行状態。
- */
+/** アップロードおよびコミット処理の進行状態。 */
 export type PublishStatus =
-  'idle' | 'signing' | 'uploading' | 'committing' | 'completed' | 'error';
+  | 'idle'
+  | 'optimizing'
+  | 'signing'
+  | 'uploading'
+  | 'committing'
+  | 'completed'
+  | 'error';
 
 /**
  * ドキュメント公開処理のパラメータ定義。
@@ -83,7 +87,10 @@ export function useDocumentPublish(): UseDocumentPublishReturn {
   const [publishedUrl, setPublishedUrl] = useState<string | null>(null);
 
   const isPublishing =
-    status === 'signing' || status === 'uploading' || status === 'committing';
+    status === 'optimizing' ||
+    status === 'signing' ||
+    status === 'uploading' ||
+    status === 'committing';
 
   const isPublishingRef = useRef(isPublishing);
   isPublishingRef.current = isPublishing;
