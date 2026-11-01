@@ -238,7 +238,7 @@ export function resolveDocumentOgp(
   /** クエリパラメータやハッシュフラグメントを除去して正規化したカノニカルURL。 */
   const canonicalUrl = toAbsoluteUrl(`/p/${doc.id}`, origin);
 
-  if (doc.isProtected) {
+  if (doc.isProtected || doc.visibility === 'protected') {
     return {
       title: MASKED_OGP_TITLE,
       description: MASKED_OGP_DESCRIPTION,

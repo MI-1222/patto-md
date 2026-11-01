@@ -310,4 +310,24 @@ describe('ドキュメントOGP総合解決処理 (`resolveDocumentOgp`)', () =>
     expect(ogp.canonicalUrl).toBe('https://patto.md/p/secret123456');
     expect(ogp.ogType).toBe('article');
   });
+
+  it("認証済みセッション等で `isProtected` が `false` の場合でも、`visibility === 'protected'` であれば多重防御としてマスキングされること。", () => {
+    const doc: OgpDocumentSource = {
+      id: 'secret123456',
+      title: '認証解除後の機密タイトル',
+      description: '認証解除後の本文抜粋。',
+      content: '本文実体。![写真](/api/assets/photo.jpg)',
+      isProtected: false,
+      visibility: 'protected',
+      attachments: [{ r2Key: 'photo.jpg', mimeType: 'image/jpeg' }],
+    };
+
+    const ogp = resolveDocumentOgp(doc, defaultOptions);
+
+    expect(ogp.title).toBe(MASKED_OGP_TITLE);
+    expect(ogp.description).toBe(MASKED_OGP_DESCRIPTION);
+    expect(ogp.imageUrl).toBe('https://patto.md/ogp.jpeg');
+    expect(ogp.cardType).toBe('summary');
+    expect(ogp.noindex).toBe(true);
+  });
 });
