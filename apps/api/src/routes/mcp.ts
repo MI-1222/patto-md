@@ -11,20 +11,16 @@
  */
 
 import {
-  ALLOWED_IMAGE_MIME_TYPES,
-  EXPIRATION_PRESETS,
   MAX_SINGLE_FILE_SIZE,
-  MAX_TITLE_LENGTH,
-  MAX_TOTAL_FILE_SIZE,
-  MIN_TITLE_LENGTH,
-  SLUG_PATTERN,
   generateCapabilityToken,
   hashToken,
+  mcpGetDocumentSchema,
+  mcpPublishDocumentSchema,
+  mcpUpdateDocumentSchema,
 } from '@patto-md/shared';
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { WebStandardStreamableHTTPServerTransport } from '@modelcontextprotocol/sdk/server/webStandardStreamableHttp.js';
 import { Hono } from 'hono';
-import { z } from 'zod';
 import { calculateExpiresAt } from '../lib/date.ts';
 import {
   decodeBase64Image,
@@ -114,69 +110,7 @@ mcpRouter.post('/', async (c) => {
   server.tool(
     'publish_document',
     'Markdownドキュメントおよび添付画像を patto-md へ新規公開し、閲覧用パーマリンクURLを発行します。',
-    {
-      title: z
-        .string()
-        .min(MIN_TITLE_LENGTH, 'タイトルの指定が必要です。')
-        .max(
-          MAX_TITLE_LENGTH,
-          `タイトルは最大${MAX_TITLE_LENGTH}文字までです。`,
-        )
-        .describe('ドキュメントのタイトル(1〜100文字)'),
-      content: z
-        .string()
-        .min(1, '本文の入力が必要です。')
-        .describe('Markdown 本文'),
-      description: z
-        .string()
-        .max(500, '要約は最大500文字までです。')
-        .optional()
-        .describe('ドキュメントの要約・抜粋(任意、最大500文字)'),
-      expiration: z
-        .enum(EXPIRATION_PRESETS, {
-          error: '無効な有効期限の指定です。',
-        })
-        .default('7days')
-        .describe(
-          '有効期限プリセット(1day, 7days, 30days, never。既定値: 7days)',
-        ),
-      visibility: z
-        .enum(['public', 'unlisted', 'protected'], {
-          error: '無効な公開範囲の指定です。',
-        })
-        .default('unlisted')
-        .describe('公開範囲(public, unlisted, protected。既定値: unlisted)'),
-      passcode: z
-        .string()
-        .min(4, 'パスコードは4文字以上で指定してください。')
-        .max(32, 'パスコードは32文字以内で指定してください。')
-        .optional()
-        .describe(
-          'パスコード保護時の暗証番号(visibilityがprotectedの場合に有効、4〜32文字)',
-        ),
-      images: z
-        .array(
-          z.object({
-            path: z
-              .string()
-              .min(1)
-              .max(255)
-              .describe('Markdown 本文内の相対パス(例: `./images/arch.png`)'),
-            base64Data: z
-              .string()
-              .min(1)
-              .describe('画像データの Base64 文字列'),
-            mimeType: z
-              .enum(ALLOWED_IMAGE_MIME_TYPES)
-              .describe(
-                '画像の MIME タイプ(`image/png`, `image/jpeg`, `image/webp`, `image/gif`, `image/svg+xml`)',
-              ),
-          }),
-        )
-        .max(10, '添付画像は最大10件までです。')
-        .optional()
-        .describe('添付画像リスト(最大10件、単一最大10MB、合計最大30MB)'),
-    },
+    mcpPublishDocumentSchema.shape,
     async (params) => {
       if (!patUser.scopes.includes('documents:write')) {
         return {
@@ -199,34 +133,6 @@ mcpRouter.post('/', async (c) => {
         passcode,
         images = [],
       } = params;
-
-      let totalEstimatedBytes = 0;
-      for (const img of images) {
-        const estimatedSize = Math.ceil((img.base64Data.length * 3) / 4);
-        if (estimatedSize > MAX_SINGLE_FILE_SIZE) {
-          return {
-            isError: true,
-            content: [
-              {
-                type: 'text',
-                text: `画像「${img.path}」のサイズが単一上限(${MAX_SINGLE_FILE_SIZE / (1024 * 1024)}MB)を超過しています。`,
-              },
-            ],
-          };
-        }
-        totalEstimatedBytes += estimatedSize;
-      }
-      if (totalEstimatedBytes > MAX_TOTAL_FILE_SIZE) {
-        return {
-          isError: true,
-          content: [
-            {
-              type: 'text',
-              text: `添付画像の合計サイズが上限(${MAX_TOTAL_FILE_SIZE / (1024 * 1024)}MB)を超過しています。`,
-            },
-          ],
-        };
-      }
 
       const expectedPrefix = getExpirationPrefix(expiration);
       const docUuid = crypto.randomUUID();
@@ -462,53 +368,7 @@ mcpRouter.post('/', async (c) => {
   server.tool(
     'update_document',
     '既存のドキュメントの Markdown 本文やタイトル、メタデータを更新します。自身の PAT で作成したドキュメントのみ更新可能です。',
-    {
-      id: z
-        .string()
-        .regex(SLUG_PATTERN, '無効なドキュメントID形式です。')
-        .describe('更新対象ドキュメントのID(Slug 12文字)'),
-      content: z
-        .string()
-        .min(1, '本文の入力が必要です。')
-        .describe('更新後の Markdown 本文'),
-      title: z
-        .string()
-        .min(MIN_TITLE_LENGTH, 'タイトルの指定が必要です。')
-        .max(
-          MAX_TITLE_LENGTH,
-          `タイトルは最大${MAX_TITLE_LENGTH}文字までです。`,
-        )
-        .optional()
-        .describe('更新後のタイトル(任意。未指定時は既存維持)'),
-      description: z
-        .string()
-        .max(500, '要約は最大500文字までです。')
-        .optional()
-        .describe('更新後の要約・抜粋(任意)'),
-      visibility: z
-        .enum(['public', 'unlisted', 'protected'], {
-          error: '無効な公開範囲の指定です。',
-        })
-        .optional()
-        .describe('更新後の公開範囲(任意)'),
-      passcode: z
-        .string()
-        .min(4, 'パスコードは4文字以上で指定してください。')
-        .max(32, 'パスコードは32文字以内で指定してください。')
-        .optional()
-        .describe('更新後のパスコード(任意)'),
-      images: z
-        .array(
-          z.object({
-            path: z.string().min(1).max(255),
-            base64Data: z.string().min(1),
-            mimeType: z.enum(ALLOWED_IMAGE_MIME_TYPES),
-          }),
-        )
-        .max(10, '添付画像は最大10件までです。')
-        .optional()
-        .describe('新規追加する添付画像リスト(任意)'),
-    },
+    mcpUpdateDocumentSchema.shape,
     async (params) => {
       if (!patUser.scopes.includes('documents:write')) {
         return {
@@ -745,16 +605,7 @@ mcpRouter.post('/', async (c) => {
   server.tool(
     'get_document',
     '指定されたドキュメントの Markdown 本文原本およびメタデータ、添付ファイル一覧を取得します。',
-    {
-      id: z
-        .string()
-        .regex(SLUG_PATTERN, '無効なドキュメントID形式です。')
-        .describe('取得対象ドキュメントのID(Slug 12文字)'),
-      passcode: z
-        .string()
-        .optional()
-        .describe('パスコード保護ドキュメント閲覧時の暗証番号(任意)'),
-    },
+    mcpGetDocumentSchema.shape,
     async (params) => {
       if (!patUser.scopes.includes('documents:read')) {
         return {
