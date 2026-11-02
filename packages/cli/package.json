@@ -4,7 +4,8 @@
   "description": "patto-md の公式ローカルCLIツール。",
   "type": "module",
   "bin": {
-    "patto-md": "./bin/patto-md.js"
+    "patto-md": "./bin/patto-md.js",
+    "cli": "./bin/patto-md.js"
   },
   "main": "./dist/index.js",
   "types": "./dist/index.d.ts",
