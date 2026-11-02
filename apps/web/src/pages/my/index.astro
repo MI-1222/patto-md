@@ -1,10 +1,62 @@
 ---
 /**
- * マイページ(所有ドキュメント一覧)画面のエントリーポイント。
+ * マイページ画面のエントリーポイント。
  *
- * ログイン中ユーザーが所有するドキュメントおよび端末ローカル履歴の一覧を提供する。
+ * ログイン中ユーザーが所有するドキュメント一覧、ローカルドキュメント統合、
+ * および外部連携用パーソナルアクセストークン(PAT)の発行・管理を提供する。
  */
-return Astro.redirect('/documents?tab=mine');
+import BaseLayout from '../../layouts/BaseLayout.astro';
+import {
+  fetchCurrentUser,
+  getFetcher,
+  resolveServerApiBaseUrl,
+} from '../../lib/api';
+import { MyPageContainer } from '../../components/my';
+import type { AuthUser, DocumentListResponse } from '@patto-md/shared';
+
+/** サーバーサイド実行時に解決されたAPIベースURL。 */
+const apiBaseUrl = resolveServerApiBaseUrl(Astro.locals);
+/** サーバーサイド実行時に解決されたFetcher(Service Binding優先)。 */
+const fetcher = getFetcher(Astro.locals);
+
+/** SSR時に解決を試みるセッションユーザー情報。 */
+let initialUser: AuthUser | null = null;
+try {
+  const cookieHeader = Astro.request.headers.get('cookie') || undefined;
+  initialUser = await fetchCurrentUser(apiBaseUrl, fetcher, cookieHeader);
+} catch (error) {
+  console.error('SSRにおけるユーザー認証セッション解決でエラーが発生。', error);
+}
+
+/**
+ * マイページの初期ドキュメントデータ。
+ *
+ * マイページではマイドキュメント(`mine`)の表示が基本であり、
+ * クライアント側でローカルストレージの保持IDおよびセッションCookieを用いてオンデマンド取得(CSR)を行う。
+ * SSR時に全公開ドキュメントを取得しない構成とすることで、D1読み取りクォータと処理レイテンシを保護する。
+ */
+const initialData: DocumentListResponse = {
+  items: [],
+  total: 0,
+  page: 1,
+  limit: 12,
+  totalPages: 0,
+};
+
+/** ページタイトル。 */
+const pageTitle = 'マイページ - patto-md';
+/** ページのメタディスクリプション。 */
+const description =
+  'patto-mdのマイページです。作成したMarkdownドキュメントの管理やAPIトークン(PAT)の設定を行えます。';
 ---
 
-
+<BaseLayout title={pageTitle} description={description}>
+  <main class="mx-auto max-w-5xl px-4 py-8 sm:px-6 sm:py-12">
+    <MyPageContainer
+      client:load
+      initialData={initialData}
+      apiBaseUrl={apiBaseUrl}
+      initialUser={initialUser}
+    />
+  </main>
+</BaseLayout>

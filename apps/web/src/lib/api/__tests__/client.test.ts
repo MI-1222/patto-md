@@ -11,6 +11,9 @@ import {
   fetchCurrentUser,
   reportDocument,
   logout,
+  fetchUserTokens,
+  createUserToken,
+  deleteUserToken,
   ApiError,
 } from '../client';
 import type {
@@ -718,6 +721,156 @@ describe('APIクライアント(src/lib/api/client.ts)', () => {
           'http://localhost:8787',
         ),
       ).rejects.toThrow('入力内容に誤りがあります。');
+    });
+  });
+
+  describe('fetchUserTokens', () => {
+    it('正常時にGETリクエストを送信し、トークン一覧を取得する。', async () => {
+      const mockResponse = {
+        tokens: [
+          {
+            id: 'token-uuid-1',
+            name: 'CLI Token',
+            tokenMasked: 'pmd_pat_...abcd',
+            scopes: ['documents:read', 'documents:write'],
+            expiresAt: '2026-12-01T00:00:00.000Z',
+            lastUsedAt: null,
+            createdAt: '2026-11-01T00:00:00.000Z',
+          },
+        ],
+      };
+
+      globalThis.fetch = vi.fn().mockResolvedValue({
+        ok: true,
+        status: 200,
+        json: async () => mockResponse,
+      } as unknown as Response);
+
+      const result = await fetchUserTokens('http://localhost:8787');
+      expect(result).toEqual(mockResponse);
+      expect(globalThis.fetch).toHaveBeenCalledWith(
+        'http://localhost:8787/api/user/tokens',
+        {
+          method: 'GET',
+          credentials: 'include',
+        },
+      );
+    });
+
+    it('APIエラー時に適切なエラーメッセージを含む ApiError を投げる。', async () => {
+      globalThis.fetch = vi.fn().mockResolvedValue({
+        ok: false,
+        status: 401,
+        json: async () => ({
+          error: { message: '認証が必要です。' },
+        }),
+      } as unknown as Response);
+
+      await expect(fetchUserTokens('http://localhost:8787')).rejects.toThrow(
+        '認証が必要です。',
+      );
+    });
+  });
+
+  describe('createUserToken', () => {
+    it('正常時にPOSTリクエストを送信し、平文トークンを含む新規トークン情報を取得する。', async () => {
+      const mockPayload = {
+        name: 'New Token',
+        scopes: ['documents:read' as const, 'documents:write' as const],
+        expiration: '30days' as const,
+      };
+
+      const mockResponse = {
+        id: 'new-token-uuid',
+        name: 'New Token',
+        token: 'pmd_pat_1234567890123456789012345678901234567890123',
+        scopes: ['documents:read', 'documents:write'],
+        expiresAt: '2026-12-01T00:00:00.000Z',
+        createdAt: '2026-11-01T00:00:00.000Z',
+      };
+
+      globalThis.fetch = vi.fn().mockResolvedValue({
+        ok: true,
+        status: 201,
+        json: async () => mockResponse,
+      } as unknown as Response);
+
+      const result = await createUserToken(
+        mockPayload,
+        'http://localhost:8787',
+      );
+      expect(result).toEqual(mockResponse);
+      expect(globalThis.fetch).toHaveBeenCalledWith(
+        'http://localhost:8787/api/user/tokens',
+        {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+          },
+          credentials: 'include',
+          body: JSON.stringify(mockPayload),
+        },
+      );
+    });
+
+    it('APIエラー時に適切なエラーメッセージを含む ApiError を投げる。', async () => {
+      globalThis.fetch = vi.fn().mockResolvedValue({
+        ok: false,
+        status: 400,
+        json: async () => ({
+          error: { message: 'トークン名を入力してください。' },
+        }),
+      } as unknown as Response);
+
+      await expect(
+        createUserToken(
+          {
+            name: '',
+            scopes: ['documents:read'],
+            expiration: '30days',
+          },
+          'http://localhost:8787',
+        ),
+      ).rejects.toThrow('トークン名を入力してください。');
+    });
+  });
+
+  describe('deleteUserToken', () => {
+    it('正常時にDELETEリクエストを送信し、削除完了結果を取得する。', async () => {
+      const mockResponse = { success: true };
+
+      globalThis.fetch = vi.fn().mockResolvedValue({
+        ok: true,
+        status: 200,
+        json: async () => mockResponse,
+      } as unknown as Response);
+
+      const result = await deleteUserToken(
+        'token-to-delete',
+        'http://localhost:8787',
+      );
+      expect(result).toEqual(mockResponse);
+      expect(globalThis.fetch).toHaveBeenCalledWith(
+        'http://localhost:8787/api/user/tokens/token-to-delete',
+        {
+          method: 'DELETE',
+          credentials: 'include',
+        },
+      );
+    });
+
+    it('APIエラー時に適切なエラーメッセージを含む ApiError を投げる。', async () => {
+      globalThis.fetch = vi.fn().mockResolvedValue({
+        ok: false,
+        status: 404,
+        json: async () => ({
+          error: { message: '指定されたトークンが見つかりません。' },
+        }),
+      } as unknown as Response);
+
+      await expect(
+        deleteUserToken('missing-token-id', 'http://localhost:8787'),
+      ).rejects.toThrow('指定されたトークンが見つかりません。');
     });
   });
 });
