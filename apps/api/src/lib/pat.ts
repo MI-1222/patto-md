@@ -1,6 +1,7 @@
 /** パーソナルアクセストークン(PAT)ユーティリティのエクスポート集約。 */
 
 import {
+  hashPat,
   timingSafeEqualHex,
   type OwnerProvider,
   type TokenScope,
@@ -110,7 +111,6 @@ export async function verifyAndResolvePat(params: {
 
   let tokenHash: string;
   try {
-    const { hashPat } = await import('@patto-md/shared');
     tokenHash = await hashPat(token);
   } catch (error) {
     console.error('PAT のハッシュ計算に失敗しました。', error);
