@@ -11,7 +11,6 @@
  */
 
 import {
-  MAX_SINGLE_FILE_SIZE,
   mcpGetDocumentSchema,
   mcpPublishDocumentBaseSchema,
   mcpPublishDocumentSchema,
@@ -22,12 +21,12 @@ import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { WebStandardStreamableHTTPServerTransport } from '@modelcontextprotocol/sdk/server/webStandardStreamableHttp.js';
 import { Hono } from 'hono';
 import {
-  decodeBase64Image,
+  processAndUploadMcpImages,
   replaceMarkdownAssetPaths,
-  resolveMcpImageMimeType,
   resolvePublicUrl,
-  sanitizeMcpFileName,
+  rollbackUploadedR2Objects,
   type AssetPathMapping,
+  type ProcessedMcpAttachmentRecord,
 } from '../lib/mcp.ts';
 import { hashPasscode, verifyPasscode } from '../lib/passcode.ts';
 import { parseUserId } from '../lib/pat.ts';
@@ -158,90 +157,32 @@ mcpRouter.post('/', async (c) => {
       const contentR2Key = `${expectedPrefix}uploads/${docUuid}/content.md`;
       const createdAt = new Date().toISOString();
 
-      const pathMappings: AssetPathMapping[] = [];
-      const attachmentRecords: Array<{
-        id: string;
-        fileName: string;
-        fileSize: number;
-        mimeType: string;
-        r2Key: string;
-      }> = [];
+      let pathMappings: AssetPathMapping[] = [];
+      let attachmentRecords: ProcessedMcpAttachmentRecord[] = [];
+      let uploadedImageKeys: string[] = [];
 
       if (images.length > 0) {
-        const preparedImages: Array<{
-          originalPath: string;
-          fileId: string;
-          fileName: string;
-          mimeType: string;
-          r2Key: string;
-          buffer: Uint8Array;
-        }> = [];
+        const uploadResult = await processAndUploadMcpImages(
+          c.env.BUCKET,
+          images,
+          expectedPrefix,
+        );
 
-        for (const img of images) {
-          const buffer = decodeBase64Image(img.base64Data);
-          if (buffer.byteLength > MAX_SINGLE_FILE_SIZE) {
-            return {
-              isError: true,
-              content: [
-                {
-                  type: 'text',
-                  text: `画像「${img.path}」のデコード後サイズが上限を超過しています。`,
-                },
-              ],
-            };
-          }
-
-          const fileId = crypto.randomUUID();
-          const fileName = sanitizeMcpFileName(img.path);
-          const r2Key = `${expectedPrefix}uploads/${fileId}/${fileName}`;
-          const resolvedMime =
-            resolveMcpImageMimeType(img.path, img.base64Data, img.mimeType) ??
-            img.mimeType;
-
-          preparedImages.push({
-            originalPath: img.path,
-            fileId,
-            fileName,
-            mimeType: resolvedMime,
-            r2Key,
-            buffer,
-          });
-        }
-
-        try {
-          await Promise.all(
-            preparedImages.map((img) =>
-              c.env.BUCKET.put(img.r2Key, img.buffer, {
-                httpMetadata: { contentType: img.mimeType },
-              }),
-            ),
-          );
-
-          for (const img of preparedImages) {
-            pathMappings.push({
-              originalPath: img.originalPath,
-              r2Key: img.r2Key,
-            });
-            attachmentRecords.push({
-              id: img.fileId,
-              fileName: img.fileName,
-              fileSize: img.buffer.byteLength,
-              mimeType: img.mimeType,
-              r2Key: img.r2Key,
-            });
-          }
-        } catch (error) {
-          console.error('MCP 画像アップロードエラー:', error);
+        if (!uploadResult.success) {
           return {
             isError: true,
             content: [
               {
                 type: 'text',
-                text: '画像の保存処理中にエラーが発生しました。',
+                text: uploadResult.error,
               },
             ],
           };
         }
+
+        pathMappings = uploadResult.data.pathMappings;
+        attachmentRecords = uploadResult.data.attachmentRecords;
+        uploadedImageKeys = uploadResult.data.uploadedR2Keys;
       }
 
       const finalMarkdown = replaceMarkdownAssetPaths(content, pathMappings);
@@ -252,6 +193,7 @@ mcpRouter.post('/', async (c) => {
         });
       } catch (error) {
         console.error('MCP 本文保存エラー:', error);
+        await rollbackUploadedR2Objects(c.env.BUCKET, uploadedImageKeys);
         return {
           isError: true,
           content: [
@@ -282,6 +224,11 @@ mcpRouter.post('/', async (c) => {
           createdAt,
         });
       } catch (error) {
+        await rollbackUploadedR2Objects(c.env.BUCKET, [
+          ...uploadedImageKeys,
+          contentR2Key,
+        ]);
+
         if (error instanceof SlugCollisionError) {
           return {
             isError: true,
@@ -431,90 +378,32 @@ mcpRouter.post('/', async (c) => {
       }
 
       const expectedPrefix = resolveDocumentExpectedPrefix(doc);
-      const pathMappings: AssetPathMapping[] = [];
-      const newAttachments: Array<{
-        id: string;
-        fileName: string;
-        fileSize: number;
-        mimeType: string;
-        r2Key: string;
-      }> = [];
+      let pathMappings: AssetPathMapping[] = [];
+      let newAttachments: ProcessedMcpAttachmentRecord[] = [];
+      let uploadedImageKeys: string[] = [];
 
       if (images.length > 0) {
-        const preparedImages: Array<{
-          originalPath: string;
-          fileId: string;
-          fileName: string;
-          mimeType: string;
-          r2Key: string;
-          buffer: Uint8Array;
-        }> = [];
+        const uploadResult = await processAndUploadMcpImages(
+          c.env.BUCKET,
+          images,
+          expectedPrefix,
+        );
 
-        for (const img of images) {
-          const buffer = decodeBase64Image(img.base64Data);
-          if (buffer.byteLength > MAX_SINGLE_FILE_SIZE) {
-            return {
-              isError: true,
-              content: [
-                {
-                  type: 'text',
-                  text: `画像「${img.path}」のサイズが上限を超過しています。`,
-                },
-              ],
-            };
-          }
-
-          const fileId = crypto.randomUUID();
-          const fileName = sanitizeMcpFileName(img.path);
-          const r2Key = `${expectedPrefix}uploads/${fileId}/${fileName}`;
-          const resolvedMime =
-            resolveMcpImageMimeType(img.path, img.base64Data, img.mimeType) ??
-            img.mimeType;
-
-          preparedImages.push({
-            originalPath: img.path,
-            fileId,
-            fileName,
-            mimeType: resolvedMime,
-            r2Key,
-            buffer,
-          });
-        }
-
-        try {
-          await Promise.all(
-            preparedImages.map((img) =>
-              c.env.BUCKET.put(img.r2Key, img.buffer, {
-                httpMetadata: { contentType: img.mimeType },
-              }),
-            ),
-          );
-
-          for (const img of preparedImages) {
-            pathMappings.push({
-              originalPath: img.originalPath,
-              r2Key: img.r2Key,
-            });
-            newAttachments.push({
-              id: img.fileId,
-              fileName: img.fileName,
-              fileSize: img.buffer.byteLength,
-              mimeType: img.mimeType,
-              r2Key: img.r2Key,
-            });
-          }
-        } catch (error) {
-          console.error('MCP 追加画像保存エラー:', error);
+        if (!uploadResult.success) {
           return {
             isError: true,
             content: [
               {
                 type: 'text',
-                text: '追加画像の保存中にエラーが発生しました。',
+                text: uploadResult.error,
               },
             ],
           };
         }
+
+        pathMappings = uploadResult.data.pathMappings;
+        newAttachments = uploadResult.data.attachmentRecords;
+        uploadedImageKeys = uploadResult.data.uploadedR2Keys;
       }
 
       const finalMarkdown = replaceMarkdownAssetPaths(content, pathMappings);
@@ -525,6 +414,7 @@ mcpRouter.post('/', async (c) => {
         });
       } catch (error) {
         console.error('MCP 本文更新エラー:', error);
+        await rollbackUploadedR2Objects(c.env.BUCKET, uploadedImageKeys);
         return {
           isError: true,
           content: [
@@ -547,6 +437,7 @@ mcpRouter.post('/', async (c) => {
       }
 
       if (nextVisibility === 'protected' && !nextPasscodeHash) {
+        await rollbackUploadedR2Objects(c.env.BUCKET, uploadedImageKeys);
         return {
           isError: true,
           content: [
@@ -624,6 +515,7 @@ mcpRouter.post('/', async (c) => {
         ]);
       } catch (error) {
         console.error('MCP D1 更新エラー:', error);
+        await rollbackUploadedR2Objects(c.env.BUCKET, uploadedImageKeys);
         return {
           isError: true,
           content: [

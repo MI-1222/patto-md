@@ -1215,4 +1215,63 @@ describe('MCP update_document ツール', () => {
       true,
     );
   });
+
+  test('`update_document` で新規画像を追加し、順次保存と Markdown 内パス置換が正常に行われること。', async () => {
+    const newImageBase64 = Buffer.from('New Image Bytes', 'utf-8').toString(
+      'base64',
+    );
+
+    const res = await app.request('/api/mcp', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${TEST_VALID_PAT_ALL}`,
+      },
+      body: JSON.stringify({
+        jsonrpc: '2.0',
+        id: 33,
+        method: 'tools/call',
+        params: {
+          name: 'update_document',
+          arguments: {
+            id: TARGET_DOC_ID,
+            content: '# 更新本文\n![新図](./images/diagram.png)',
+            images: [
+              {
+                path: './images/diagram.png',
+                base64Data: newImageBase64,
+                mimeType: 'image/png',
+              },
+            ],
+          },
+        },
+      }),
+    });
+
+    assert.strictEqual(res.status, 200);
+    const json = (await res.json()) as {
+      result: {
+        content: Array<{ type: string; text: string }>;
+        isError?: boolean;
+      };
+    };
+    assert.strictEqual(json.result.isError, undefined);
+
+    // 新規画像が D1 attachments に登録されていること
+    const newAtt = mockDb._attachmentStore.find(
+      (a) => a.file_name === 'diagram.png',
+    );
+    assert.notStrictEqual(newAtt, undefined);
+    assert.strictEqual(newAtt?.mime_type, 'image/png');
+
+    // R2 に新規画像が保存されていること
+    const imgObj = await mockR2.get(newAtt!.r2_key);
+    assert.notStrictEqual(imgObj, null);
+
+    // R2 本文内の画像パスが置換されていること
+    const r2Text = await (await mockR2.get(
+      'exp-7d/uploads/uuid-up/content.md',
+    ))!.text();
+    assert.strictEqual(r2Text.includes(`/api/assets/${newAtt!.r2_key}`), true);
+  });
 });

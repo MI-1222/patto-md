@@ -9,6 +9,7 @@ import { Buffer } from 'node:buffer';
 import {
   extractMimeFromDataUrl,
   isAllowedImageMimeType,
+  MAX_SINGLE_FILE_SIZE,
   resolveImageMimeType,
   type AllowedImageMimeType,
 } from '@patto-md/shared';
@@ -182,4 +183,148 @@ export function resolveMcpImageMimeType(
     }
   }
   return resolveImageMimeType(pathStr);
+}
+
+/** MCP経由で受け取る画像入力アイテムの型。 */
+export interface ProcessMcpImageItem {
+  /** 相対パスまたはファイル名。 */
+  path: string;
+  /** Base64文字列(または Data URL)。 */
+  base64Data: string;
+  /** 明示的なMIMEタイプ(任意)。 */
+  mimeType?: string;
+}
+
+/** 処理済み添付ファイルレコード情報。 */
+export interface ProcessedMcpAttachmentRecord {
+  /** 添付ファイルID(UUID)。 */
+  id: string;
+  /** サニタイズ済みファイル名。 */
+  fileName: string;
+  /** デコード後ファイルサイズ(バイト)。 */
+  fileSize: number;
+  /** 解決済みMIMEタイプ。 */
+  mimeType: string;
+  /** 保存先R2オブジェクトキー。 */
+  r2Key: string;
+}
+
+/** 画像処理およびR2保存の成功結果。 */
+export interface ProcessedMcpImagesResult {
+  /** Markdown 本文置換用マッピング配列。 */
+  pathMappings: AssetPathMapping[];
+  /** DB永続化用添付ファイルレコード配列。 */
+  attachmentRecords: ProcessedMcpAttachmentRecord[];
+  /** アップロード完了したR2キー配列(エラー時ロールバック用)。 */
+  uploadedR2Keys: string[];
+}
+
+/** 画像処理およびR2保存の結果型。 */
+export type UploadMcpImagesResult =
+  | { success: true; data: ProcessedMcpImagesResult }
+  | { success: false; error: string };
+
+/**
+ * 失敗時にアップロード済みのR2オブジェクトをベストエフォートでロールバック削除する。
+ *
+ * @param bucket - 対象のR2バケットインスタンス。
+ * @param keys - 削除対象のR2キー配列。
+ */
+export async function rollbackUploadedR2Objects(
+  bucket: R2Bucket,
+  keys: string[],
+): Promise<void> {
+  if (
+    !keys ||
+    keys.length === 0 ||
+    !bucket ||
+    typeof bucket.delete !== 'function'
+  ) {
+    return;
+  }
+
+  await Promise.allSettled(keys.map((key) => bucket.delete(key)));
+}
+
+/**
+ * MCP経由で渡された画像配列を順次デコードし、R2バケットへ逐次保存する。
+ *
+ * Cloudflare Workers の 128MB メモリ制限下でのOut of Memoryを防止するため、
+ * 全件の一括デコードや配列へのバッファ保持を排除し、
+ * 1画像ごとに「デコード → バリデーション → R2保存 → Base64メモリ解放」を逐次処理する。
+ * 処理途中でエラーが発生した場合は、それまでにアップロードされたR2オブジェクトを自動ロールバックする。
+ *
+ * @param bucket - 保存先R2バケットインスタンス。
+ * @param images - アップロード対象の画像アイテム配列。
+ * @param expectedPrefix - 有効期限プリセット等から導出されたR2キープレフィックス。
+ * @param maxSingleFileSize - 単一ファイルの許容最大サイズ(既定値: `MAX_SINGLE_FILE_SIZE`)。
+ * @returns 処理結果オブジェクト。
+ */
+export async function processAndUploadMcpImages(
+  bucket: R2Bucket,
+  images: ProcessMcpImageItem[],
+  expectedPrefix: string,
+  maxSingleFileSize: number = MAX_SINGLE_FILE_SIZE,
+): Promise<UploadMcpImagesResult> {
+  const pathMappings: AssetPathMapping[] = [];
+  const attachmentRecords: ProcessedMcpAttachmentRecord[] = [];
+  const uploadedR2Keys: string[] = [];
+
+  try {
+    for (const img of images) {
+      const buffer = decodeBase64Image(img.base64Data);
+      if (buffer.byteLength > maxSingleFileSize) {
+        await rollbackUploadedR2Objects(bucket, uploadedR2Keys);
+        return {
+          success: false,
+          error: `画像「${img.path}」のデコード後サイズが上限を超過しています。`,
+        };
+      }
+
+      const fileId = crypto.randomUUID();
+      const fileName = sanitizeMcpFileName(img.path);
+      const r2Key = `${expectedPrefix}uploads/${fileId}/${fileName}`;
+      const resolvedMime =
+        resolveMcpImageMimeType(img.path, img.base64Data, img.mimeType) ??
+        img.mimeType ??
+        'application/octet-stream';
+
+      // Base64文字列の参照を解除し、V8による早期ガベージコレクションを促進する。
+      (img as { base64Data?: string }).base64Data = '';
+
+      await bucket.put(r2Key, buffer, {
+        httpMetadata: { contentType: resolvedMime },
+      });
+      uploadedR2Keys.push(r2Key);
+
+      pathMappings.push({
+        originalPath: img.path,
+        r2Key,
+      });
+
+      attachmentRecords.push({
+        id: fileId,
+        fileName,
+        fileSize: buffer.byteLength,
+        mimeType: resolvedMime,
+        r2Key,
+      });
+    }
+
+    return {
+      success: true,
+      data: {
+        pathMappings,
+        attachmentRecords,
+        uploadedR2Keys,
+      },
+    };
+  } catch (error) {
+    console.error('MCP画像保存処理エラー:', error);
+    await rollbackUploadedR2Objects(bucket, uploadedR2Keys);
+    return {
+      success: false,
+      error: '画像の保存処理中にエラーが発生しました。',
+    };
+  }
 }
