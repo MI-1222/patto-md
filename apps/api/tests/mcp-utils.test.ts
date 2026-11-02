@@ -3,6 +3,7 @@ import test, { describe } from 'node:test';
 import {
   decodeBase64Image,
   replaceMarkdownAssetPaths,
+  resolveMcpImageMimeType,
   resolvePublicUrl,
   sanitizeMcpFileName,
 } from '../src/lib/mcp.ts';
@@ -111,5 +112,43 @@ describe('MCP 公開 URL 解決 (`resolvePublicUrl`)', () => {
       'abc123xyz789',
     );
     assert.strictEqual(url, 'https://patto-md.workers.dev/p/abc123xyz789');
+  });
+});
+
+describe('MCP 画像 MIME タイプ解決 (`resolveMcpImageMimeType`)', () => {
+  test('明示的な許可 MIME タイプが渡された場合はそれが最優先で採用されること。', () => {
+    const mime = resolveMcpImageMimeType(
+      'test.jpg',
+      'data:image/webp;base64,...',
+      'image/png',
+    );
+    assert.strictEqual(mime, 'image/png');
+  });
+
+  test('明示的 MIME タイプが未指定で Data URL がある場合は Data URL から抽出されること。', () => {
+    const mime = resolveMcpImageMimeType(
+      'test.unknown',
+      'data:image/webp;base64,UklGRk...',
+    );
+    assert.strictEqual(mime, 'image/webp');
+  });
+
+  test('Data URL プレフィックスが無い場合はファイル名拡張子から解決されること。', () => {
+    assert.strictEqual(
+      resolveMcpImageMimeType('photo.jpeg', 'aGVsbG8='),
+      'image/jpeg',
+    );
+    assert.strictEqual(
+      resolveMcpImageMimeType('diagram.svg', 'aGVsbG8='),
+      'image/svg+xml',
+    );
+  });
+
+  test('対象外拡張子かつ Data URL なしの場合は null を返却すること。', () => {
+    assert.strictEqual(
+      resolveMcpImageMimeType('document.pdf', 'aGVsbG8='),
+      null,
+    );
+    assert.strictEqual(resolveMcpImageMimeType('script.exe', 'aGVsbG8='), null);
   });
 });

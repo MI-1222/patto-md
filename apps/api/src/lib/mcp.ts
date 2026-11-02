@@ -6,6 +6,12 @@
  */
 
 import { Buffer } from 'node:buffer';
+import {
+  extractMimeFromDataUrl,
+  isAllowedImageMimeType,
+  resolveImageMimeType,
+  type AllowedImageMimeType,
+} from '@patto-md/shared';
 
 /** Markdown 内アセットパス置換マッピング情報。 */
 export interface AssetPathMapping {
@@ -148,4 +154,32 @@ export function resolvePublicUrl(
     : new URL(reqUrl).origin.replace(/\/api\/mcp|\/mcp$/, '');
 
   return `${base}/p/${slug}`;
+}
+
+/**
+ * MCP添付画像のMIMEタイプを解決する。
+ *
+ * 指定されたMIMEタイプが有効であればそれを採用し、
+ * 未指定または無効な場合は Data URL プレフィックスおよびファイル名拡張子から補完・解決する。
+ *
+ * @param pathStr - ファイルパスまたはファイル名。
+ * @param base64Data - Base64 または Data URL 文字列(任意)。
+ * @param explicitMimeType - 明示的に指定された MIME タイプ(任意)。
+ * @returns 解決された画像MIMEタイプ。判定不能時は `null`。
+ */
+export function resolveMcpImageMimeType(
+  pathStr: string,
+  base64Data?: string,
+  explicitMimeType?: string,
+): AllowedImageMimeType | null {
+  if (explicitMimeType && isAllowedImageMimeType(explicitMimeType)) {
+    return explicitMimeType;
+  }
+  if (base64Data) {
+    const fromDataUrl = extractMimeFromDataUrl(base64Data);
+    if (fromDataUrl) {
+      return fromDataUrl;
+    }
+  }
+  return resolveImageMimeType(pathStr);
 }

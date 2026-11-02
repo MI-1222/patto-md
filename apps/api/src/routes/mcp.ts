@@ -22,6 +22,7 @@ import { Hono } from 'hono';
 import {
   decodeBase64Image,
   replaceMarkdownAssetPaths,
+  resolveMcpImageMimeType,
   resolvePublicUrl,
   sanitizeMcpFileName,
   type AssetPathMapping,
@@ -176,12 +177,15 @@ mcpRouter.post('/', async (c) => {
           const fileId = crypto.randomUUID();
           const fileName = sanitizeMcpFileName(img.path);
           const r2Key = `${expectedPrefix}uploads/${fileId}/${fileName}`;
+          const resolvedMime =
+            resolveMcpImageMimeType(img.path, img.base64Data, img.mimeType) ??
+            img.mimeType;
 
           preparedImages.push({
             originalPath: img.path,
             fileId,
             fileName,
-            mimeType: img.mimeType,
+            mimeType: resolvedMime,
             r2Key,
             buffer,
           });
@@ -431,12 +435,15 @@ mcpRouter.post('/', async (c) => {
           const fileId = crypto.randomUUID();
           const fileName = sanitizeMcpFileName(img.path);
           const r2Key = `${expectedPrefix}uploads/${fileId}/${fileName}`;
+          const resolvedMime =
+            resolveMcpImageMimeType(img.path, img.base64Data, img.mimeType) ??
+            img.mimeType;
 
           preparedImages.push({
             originalPath: img.path,
             fileId,
             fileName,
-            mimeType: img.mimeType,
+            mimeType: resolvedMime,
             r2Key,
             buffer,
           });

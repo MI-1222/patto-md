@@ -1,5 +1,6 @@
 import {
   MAX_TOTAL_FILE_SIZE,
+  resolveFileMimeType as sharedResolveFileMimeType,
   type DocumentAttachmentCommit,
   type DocumentCommitResponse,
   type DocumentVisibility,
@@ -74,29 +75,10 @@ export function resolveFileMimeType(
   file: File,
   defaultFallback: UploadSignFileItem['type'] = 'image/png',
 ): UploadSignFileItem['type'] {
-  if (file.type && file.type.trim().length > 0) {
-    return file.type as UploadSignFileItem['type'];
-  }
-
-  const ext = (file.name.split('.').pop() || '').toLowerCase();
-  switch (ext) {
-    case 'png':
-      return 'image/png';
-    case 'jpg':
-    case 'jpeg':
-      return 'image/jpeg';
-    case 'webp':
-      return 'image/webp';
-    case 'gif':
-      return 'image/gif';
-    case 'svg':
-      return 'image/svg+xml';
-    case 'md':
-    case 'markdown':
-      return 'text/markdown';
-    default:
-      return defaultFallback;
-  }
+  return sharedResolveFileMimeType(
+    file,
+    defaultFallback,
+  ) as UploadSignFileItem['type'];
 }
 
 /**
