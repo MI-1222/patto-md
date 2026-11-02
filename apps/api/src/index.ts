@@ -33,6 +33,8 @@ app.use(
       TURNSTILE_TOKEN_HEADER,
       'X-Turnstile-Token',
       'cf-turnstile-response',
+      'mcp-session-id',
+      'last-event-id',
     ],
     exposeHeaders: [
       'Retry-After',
@@ -42,6 +44,7 @@ app.use(
       'X-RateLimit-Limit',
       'X-RateLimit-Remaining',
       'X-RateLimit-Reset',
+      'mcp-session-id',
     ],
     maxAge: 86400,
   }),
