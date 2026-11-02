@@ -8,8 +8,8 @@ import {
 } from '@patto-md/shared';
 import { Hono } from 'hono';
 import { createPresignedPutUrl, generateR2Key } from '../lib/r2.ts';
+import { createOptionalPatOrTurnstileMiddleware } from '../middlewares/pat-auth.ts';
 import { createRateLimitMiddleware } from '../middlewares/rate-limit.ts';
-import { createTurnstileMiddleware } from '../middlewares/turnstile.ts';
 import type { AppEnv } from '../types.ts';
 
 /** ファイルアップロード関連のサブルーター。 */
@@ -29,7 +29,7 @@ uploadRouter.post(
     limit: RATE_LIMIT_UPLOAD_SIGN_LIMIT,
     windowSeconds: RATE_LIMIT_UPLOAD_SIGN_WINDOW_SECONDS,
   }),
-  createTurnstileMiddleware(),
+  createOptionalPatOrTurnstileMiddleware('documents:write'),
   async (c) => {
     let rawBody: unknown;
     try {

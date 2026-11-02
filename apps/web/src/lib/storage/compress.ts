@@ -5,6 +5,8 @@
  * R2ストレージ容量の消費を抑制するため、長辺最大1920pxリサイズおよびWebP変換を実施する。
  */
 
+import { resolveFileMimeType } from '@patto-md/shared';
+
 /** 画像圧縮オプションの定義。 */
 export interface ImageCompressionOptions {
   /** 最大長辺ピクセル数 (既定値: 1920)。 */
@@ -111,25 +113,7 @@ export function resolveImageMimeType(
   file: { name: string; type?: string },
   defaultFallback = 'image/png',
 ): string {
-  if (file.type && file.type.trim().length > 0) {
-    return file.type;
-  }
-  const ext = (file.name.split('.').pop() || '').toLowerCase();
-  switch (ext) {
-    case 'svg':
-      return 'image/svg+xml';
-    case 'gif':
-      return 'image/gif';
-    case 'png':
-      return 'image/png';
-    case 'jpg':
-    case 'jpeg':
-      return 'image/jpeg';
-    case 'webp':
-      return 'image/webp';
-    default:
-      return defaultFallback;
-  }
+  return resolveFileMimeType(file, defaultFallback);
 }
 
 /**

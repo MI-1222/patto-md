@@ -28,6 +28,7 @@ import {
 } from '@patto-md/shared';
 import { Hono } from 'hono';
 import { deleteCookie, getCookie, setCookie } from 'hono/cookie';
+import { resolvePatAuth } from '../middlewares/pat-auth.ts';
 import {
   getOAuthStrategy,
   resolveOAuthCredentials,
@@ -85,14 +86,29 @@ function resolveFrontendOrigin(env: AppEnv['Bindings']): string {
 }
 
 /**
- * ログイン中ユーザー情報取得エンドポイント（`GET /api/auth/me`）。
+ * ログイン中ユーザー情報取得エンドポイント(`GET /api/auth/me`)。
  *
- * Cookie のセッション JWT を検証し、ログイン中のユーザー情報を返却する。未ログイン時は `user: null`。
+ * Cookie のセッション JWT または Bearer PAT を検証し、認証済みユーザー情報を返却する。未認証時は `user: null`。
  */
-authRouter.get('/me', authSessionMiddleware(), (c) => {
-  const user = c.get('user') ?? null;
+authRouter.get('/me', authSessionMiddleware(), async (c) => {
+  let user = c.get('user') ?? null;
+  const hasAuthHeader = Boolean(c.req.header('Authorization'));
+  if (!user || hasAuthHeader) {
+    await resolvePatAuth(c);
+    user = c.get('user') ?? null;
+  }
+  const patUser = c.get('patUser');
+
   c.header('Cache-Control', 'private, no-cache, no-store');
-  const responsePayload: AuthMeResponse = { user };
+  const responsePayload: AuthMeResponse = {
+    user,
+    ...(patUser
+      ? {
+          scopes: patUser.scopes,
+          tokenName: patUser.name,
+        }
+      : {}),
+  };
   return c.json(responsePayload, 200);
 });
 

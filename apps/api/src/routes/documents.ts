@@ -5,8 +5,6 @@ import {
   documentReportRequestSchema,
   documentUpdateRequestSchema,
   documentVerifyPasscodeRequestSchema,
-  generateCapabilityToken,
-  hashToken,
   RATE_LIMIT_DOCUMENT_CLAIM_LIMIT,
   RATE_LIMIT_DOCUMENT_CLAIM_WINDOW_SECONDS,
   RATE_LIMIT_DOCUMENT_COMMIT_LIMIT,
@@ -35,6 +33,7 @@ import {
   type DocumentUpdateResponse,
   type DocumentVerifyPasscodeResponse,
   type DocumentVisibility,
+  type OwnerProvider,
   SLUG_PATTERN,
   z,
 } from '@patto-md/shared';
@@ -44,6 +43,8 @@ import { extractBearerToken } from '../lib/auth.ts';
 import { calculateDocumentCacheControl } from '../lib/cache.ts';
 import { calculateExpiresAt } from '../lib/date.ts';
 import { hashPasscode, verifyPasscode } from '../lib/passcode.ts';
+import { isPat, parseUserId } from '../lib/pat.ts';
+import { resolvePatAuth } from '../middlewares/pat-auth.ts';
 import {
   checkR2ObjectExists,
   copyAndDeleteR2Object,
@@ -55,7 +56,7 @@ import {
 } from '../lib/r2.ts';
 import { getClientIp } from '../lib/rate-limit.ts';
 import { hashClientIp } from '../lib/ip-hash.ts';
-import { generateSlug } from '../lib/slug.ts';
+import { createDocument, SlugCollisionError } from '../lib/document-store.ts';
 import {
   buildPasscodeSetCookieHeader,
   createViewToken,
@@ -245,124 +246,82 @@ documentsRouter.post(
       );
     }
 
-    // 作成日時および有効期限日時の決定(ISO 8601形式で統一)。
-    const createdAt = new Date().toISOString();
-    const updatedAt = createdAt;
-    const expiresAt = calculateExpiresAt(expiration, new Date(createdAt));
+    let ownerUserId: string | null = null;
+    let ownerProvider: OwnerProvider | null = null;
 
-    const editToken = generateCapabilityToken('edit');
-    const modifyToken = generateCapabilityToken('modify');
-    const [editTokenHash, modifyTokenHash] = await Promise.all([
-      hashToken(editToken),
-      hashToken(modifyToken),
-    ]);
+    const authHeader = c.req.header('Authorization');
+    const bearer = extractBearerToken(authHeader);
 
-    let passcodeHash: string | null = null;
-    if (visibility === 'protected' && passcode) {
-      passcodeHash = await hashPasscode(passcode);
-    }
+    if (bearer && isPat(bearer)) {
+      const patUser = await resolvePatAuth(c);
 
-    // D1へのアトミックコミット(主キー衝突時は最大3回リトライ)。
-    const maxRetries = 3;
-    let committedSlug: string | null = null;
-    let lastError: unknown = null;
-
-    for (let attempt = 0; attempt < maxRetries; attempt++) {
-      const candidateSlug = generateSlug();
-
-      // ドキュメント本体の登録ステートメント。
-      const documentStatement = c.env.DB.prepare(
-        `INSERT INTO documents (
-        id,
-        title,
-        description,
-        content_r2_key,
-        status,
-        expires_at,
-        edit_token_hash,
-        modify_token_hash,
-        visibility,
-        passcode_hash,
-        created_at,
-        updated_at
-      ) VALUES (?, ?, ?, ?, 'published', ?, ?, ?, ?, ?, ?, ?)`,
-      ).bind(
-        candidateSlug,
-        title,
-        description ?? null,
-        contentR2Key,
-        expiresAt,
-        editTokenHash,
-        modifyTokenHash,
-        visibility,
-        passcodeHash,
-        createdAt,
-        updatedAt,
-      );
-
-      // 添付ファイル群の登録ステートメント配列(外部キー順序を担保)。
-      const attachmentStatements = attachments.map((attachment) => {
-        return c.env.DB.prepare(
-          `INSERT INTO attachments (
-          id,
-          document_id,
-          file_name,
-          file_size,
-          mime_type,
-          r2_key,
-          created_at
-        ) VALUES (?, ?, ?, ?, ?, ?, ?)`,
-        ).bind(
-          attachment.id,
-          candidateSlug,
-          attachment.fileName,
-          attachment.fileSize,
-          attachment.mimeType,
-          attachment.r2Key,
-          createdAt,
-        );
-      });
-
-      try {
-        // 単一トランザクション内で一括実行する。
-        await c.env.DB.batch([documentStatement, ...attachmentStatements]);
-        committedSlug = candidateSlug;
-        break;
-      } catch (error) {
-        lastError = error;
-        const errorMessage =
-          error instanceof Error ? error.message : String(error);
-
-        // 主キーの一意性制約違反時はリトライを実施する。
-        if (
-          errorMessage.includes('UNIQUE constraint failed') ||
-          errorMessage.includes('PRIMARY KEY')
-        ) {
-          console.warn(
-            `Slug衝突を検知しました(${candidateSlug})。再試行中(${attempt + 1}/${maxRetries})...`,
-          );
-          continue;
-        }
-
-        // その他のDBエラー時はリトライせず中断する。
-        console.error('D1データベース書き込みエラー:', error);
+      if (!patUser) {
         return c.json(
           {
             error: {
-              message: 'データベースの書き込みに失敗しました。',
+              message: '無効または有効期限切れのPATトークンです。',
+            },
+          },
+          401,
+        );
+      }
+
+      if (!patUser.scopes.includes('documents:write')) {
+        return c.json(
+          {
+            error: {
+              message:
+                '操作に必要な権限(スコープ: documents:write)がありません。',
+            },
+          },
+          403,
+        );
+      }
+
+      const parsed = parseUserId(patUser.userId);
+      if (parsed) {
+        ownerUserId = parsed.providerUserId;
+        ownerProvider = parsed.provider;
+      }
+    } else {
+      const sessionUser = await resolveSessionUser(c);
+      if (sessionUser) {
+        ownerUserId = sessionUser.providerUserId;
+        ownerProvider = sessionUser.provider;
+      }
+    }
+
+    // D1 へのドキュメント永続化および Slug 採番。
+    let createResult;
+    try {
+      createResult = await createDocument(c.env.DB, {
+        title,
+        description,
+        contentR2Key,
+        expiration,
+        visibility,
+        passcode,
+        ownerUserId,
+        ownerProvider,
+        attachments,
+      });
+    } catch (error) {
+      if (error instanceof SlugCollisionError) {
+        return c.json(
+          {
+            error: {
+              message: 'ドキュメント識別子の採番に失敗しました。',
             },
           },
           500,
         );
       }
-    }
 
-    if (!committedSlug) {
-      console.error('Slug生成とD1コミットのリトライ上限超過:', lastError);
+      console.error('D1データベース書き込みエラー:', error);
       return c.json(
         {
           error: {
-            message: 'ドキュメント識別子の採番に失敗しました。',
+            message: 'データベースの書き込みに失敗しました。',
           },
         },
         500,
@@ -370,13 +329,13 @@ documentsRouter.post(
     }
 
     const responsePayload: DocumentCommitResponse = {
-      id: committedSlug,
-      url: `/p/${committedSlug}`,
+      id: createResult.slug,
+      url: `/p/${createResult.slug}`,
       title,
-      editToken,
-      modifyToken,
-      expiresAt,
-      createdAt,
+      editToken: createResult.editToken,
+      modifyToken: createResult.modifyToken,
+      expiresAt: createResult.expiresAt,
+      createdAt: createResult.createdAt,
     };
 
     return c.json(responsePayload, 201);
@@ -426,6 +385,49 @@ documentsRouter.get('/', async (c) => {
   let currentUser = null;
   if (isMine) {
     currentUser = await resolveSessionUser(c);
+    if (!currentUser) {
+      const authHeader = c.req.header('Authorization');
+      const bearer = extractBearerToken(authHeader);
+      if (bearer && isPat(bearer)) {
+        const patUser = await resolvePatAuth(c);
+
+        if (!patUser) {
+          c.header('Cache-Control', 'no-store');
+          return c.json(
+            {
+              error: {
+                message: '無効または有効期限切れのPATトークンです。',
+              },
+            },
+            401,
+          );
+        }
+
+        if (!patUser.scopes.includes('documents:read')) {
+          c.header('Cache-Control', 'no-store');
+          return c.json(
+            {
+              error: {
+                message:
+                  '操作に必要な権限(スコープ: documents:read)がありません。',
+              },
+            },
+            403,
+          );
+        }
+
+        const parsed = parseUserId(patUser.userId);
+        if (parsed) {
+          currentUser = {
+            provider: parsed.provider,
+            providerUserId: parsed.providerUserId,
+            username: patUser.name,
+            avatarUrl: null,
+          };
+        }
+      }
+    }
+
     if (!currentUser) {
       c.header('Cache-Control', 'no-store');
       return c.json(
@@ -631,10 +633,11 @@ documentsRouter.get('/:id', async (c) => {
     );
   }
 
+  const bearerToken = extractBearerToken(c.req.header('Authorization'));
+
   if (doc.visibility === 'protected') {
     let isAuthorized = false;
 
-    const bearerToken = extractBearerToken(c.req.header('Authorization'));
     if (bearerToken) {
       const [isEditMatched, isModifyMatched] = await Promise.all([
         verifyTokenHash(bearerToken, doc.edit_token_hash),
@@ -665,6 +668,19 @@ documentsRouter.get('/:id', async (c) => {
         currentUser &&
         currentUser.providerUserId === doc.owner_user_id &&
         currentUser.provider === doc.owner_provider
+      ) {
+        isAuthorized = true;
+      }
+    }
+
+    if (!isAuthorized && bearerToken && isPat(bearerToken)) {
+      const patUser = await resolvePatAuth(c);
+      if (
+        patUser &&
+        patUser.scopes.includes('documents:read') &&
+        doc.owner_user_id &&
+        doc.owner_provider &&
+        `${doc.owner_provider}:${doc.owner_user_id}` === patUser.userId
       ) {
         isAuthorized = true;
       }
@@ -765,9 +781,11 @@ documentsRouter.get('/:id', async (c) => {
   }
 
   // 残存有効期間に基づくCache-Controlヘッダーの付与。
-  // パスコード保護ドキュメントの場合はエッジキャッシュ汚染防止のため常に private, no-store を強制する。
-  if (doc.visibility === 'protected') {
+  // パスコード保護ドキュメント、または認証ヘッダー(PAT / ケイパビリティトークン)が付与されているリクエストは、
+  // エッジキャッシュの混入・汚染を防止するため、常に private, no-cache, no-store を強制し、Vary ヘッダーを設定する。
+  if (doc.visibility === 'protected' || bearerToken) {
     c.header('Cache-Control', 'private, no-cache, no-store');
+    c.header('Vary', 'Accept-Encoding, Authorization');
   } else {
     const cacheControl = calculateDocumentCacheControl(doc.expires_at, now);
     c.header('Cache-Control', cacheControl);

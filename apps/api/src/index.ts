@@ -6,6 +6,8 @@ import { documentsRouter } from './routes/documents';
 import { uploadRouter } from './routes/upload';
 import { assetsRouter } from './routes/assets';
 import { authRouter } from './routes/auth';
+import { userTokensRouter } from './routes/user-tokens';
+import { mcpRouter } from './routes/mcp';
 import { resolveAllowedOrigin } from './lib/cors';
 import type { AppEnv } from './types';
 
@@ -31,6 +33,8 @@ app.use(
       TURNSTILE_TOKEN_HEADER,
       'X-Turnstile-Token',
       'cf-turnstile-response',
+      'mcp-session-id',
+      'last-event-id',
     ],
     exposeHeaders: [
       'Retry-After',
@@ -40,6 +44,7 @@ app.use(
       'X-RateLimit-Limit',
       'X-RateLimit-Remaining',
       'X-RateLimit-Reset',
+      'mcp-session-id',
     ],
     maxAge: 86400,
   }),
@@ -97,5 +102,12 @@ app.route('/api/assets', assetsRouter);
 
 /** OAuth認証関連APIサブルーターのマウント。 */
 app.route('/api/auth', authRouter);
+
+/** PAT管理関連APIサブルーターのマウント。 */
+app.route('/api/user/tokens', userTokensRouter);
+
+/** Model Context Protocol (MCP) エンドポイントのマウント。 */
+app.route('/api/mcp', mcpRouter);
+app.route('/mcp', mcpRouter);
 
 export default app;

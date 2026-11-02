@@ -30,6 +30,14 @@ export interface DocumentListContainerProps {
   initialData: DocumentListResponse;
   /** APIベースURL。 */
   apiBaseUrl?: string;
+  /** 初期選択タブ種別(省略時は `'all'`)。 */
+  defaultTab?: DocumentTab;
+  /** 表示対象タブを固定し、タブ切り替えUIおよびURLクエリ(`tab`)操作を無効化する(マイページ統合用)。 */
+  fixedTab?: DocumentTab;
+  /** ヘッダータイトル部分の表示制御(マイページ統合時などに非表示化)。 */
+  hideHeaderTitle?: boolean;
+  /** SSR側で解決された初期ログインユーザー情報(任意)。 */
+  initialUser?: AuthUser | null;
 }
 
 /**
@@ -37,15 +45,22 @@ export interface DocumentListContainerProps {
  *
  * @param tab - 選択されたタブ種別。
  * @param page - 現在のページ番号。
+ * @param fixedTab - 固定タブ種別(指定時は `tab` パラメータを操作しない)。
  */
-function syncUrlState(tab: DocumentTab, page: number): void {
+function syncUrlState(
+  tab: DocumentTab,
+  page: number,
+  fixedTab?: DocumentTab,
+): void {
   if (typeof window === 'undefined') return;
 
   const params = new URLSearchParams(window.location.search);
-  if (tab === 'mine') {
-    params.set('tab', 'mine');
-  } else {
-    params.delete('tab');
+  if (!fixedTab) {
+    if (tab === 'mine') {
+      params.set('tab', 'mine');
+    } else {
+      params.delete('tab');
+    }
   }
 
   if (page > 1) {
@@ -69,15 +84,29 @@ function syncUrlState(tab: DocumentTab, page: number): void {
 export const DocumentListContainer: React.FC<DocumentListContainerProps> = ({
   initialData,
   apiBaseUrl,
+  defaultTab = 'all',
+  fixedTab,
+  hideHeaderTitle = false,
+  initialUser,
 }) => {
-  const [activeTab, setActiveTab] = useState<DocumentTab>('all');
+  const [activeTab, setActiveTab] = useState<DocumentTab>(
+    fixedTab ?? defaultTab,
+  );
   const [currentPage, setCurrentPage] = useState<number>(initialData.page);
   const [searchQuery, setSearchQuery] = useState<string>('');
   const [myDocumentIds, setMyDocumentIds] = useState<string[]>([]);
   const [isLoading, setIsLoading] = useState<boolean>(false);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
 
-  const [currentUser, setCurrentUser] = useState<AuthUser | null>(null);
+  const [currentUser, setCurrentUser] = useState<AuthUser | null>(
+    initialUser ?? null,
+  );
+
+  useEffect(() => {
+    if (initialUser !== undefined) {
+      setCurrentUser(initialUser);
+    }
+  }, [initialUser]);
   const [allData, setAllData] = useState<DocumentListResponse>(initialData);
   const [mineData, setMineData] = useState<DocumentListResponse | null>(null);
   const [unclaimedDocs, setUnclaimedDocs] = useState<DocumentListItem[]>([]);
@@ -253,11 +282,16 @@ export const DocumentListContainer: React.FC<DocumentListContainerProps> = ({
     }
   };
 
-  // 初回マウント時にローカルストレージ、ログイン状態、およびURLパラメータから初期状態を反映
   useEffect(() => {
-    fetchCurrentUser().then((user) => {
-      setCurrentUser(user);
-    });
+    let resolvedUser = currentUser;
+    if (initialUser !== undefined) {
+      resolvedUser = initialUser;
+      setCurrentUser(initialUser);
+    } else {
+      fetchCurrentUser().then((user) => {
+        setCurrentUser(user);
+      });
+    }
 
     const ids = getMyDocumentIds();
     setMyDocumentIds(ids);
@@ -265,24 +299,35 @@ export const DocumentListContainer: React.FC<DocumentListContainerProps> = ({
     const params = new URLSearchParams(window.location.search);
     const tabParam = params.get('tab');
     const pageParam = parseInt(params.get('page') || '1', 10);
-    const targetTab: DocumentTab = tabParam === 'mine' ? 'mine' : 'all';
+    const targetTab: DocumentTab = fixedTab
+      ? fixedTab
+      : tabParam === 'mine'
+        ? 'mine'
+        : tabParam === 'all'
+          ? 'all'
+          : defaultTab;
     const targetPage =
       Number.isInteger(pageParam) && pageParam > 0 ? pageParam : 1;
 
     if (targetTab !== 'all' || targetPage !== initialData.page) {
       setActiveTab(targetTab);
       setCurrentPage(targetPage);
-      loadDocuments(targetTab, targetPage, ids);
+      loadDocuments(targetTab, targetPage, ids, resolvedUser);
     }
-  }, [initialData.page, loadDocuments]);
+  }, [defaultTab, fixedTab, initialData.page, initialUser, loadDocuments]);
 
-  // ブラウザの戻る・進む(popstate)操作に連動
   useEffect(() => {
     const handlePopState = () => {
       const params = new URLSearchParams(window.location.search);
       const tabParam = params.get('tab');
       const pageParam = parseInt(params.get('page') || '1', 10);
-      const targetTab: DocumentTab = tabParam === 'mine' ? 'mine' : 'all';
+      const targetTab: DocumentTab = fixedTab
+        ? fixedTab
+        : tabParam === 'mine'
+          ? 'mine'
+          : tabParam === 'all'
+            ? 'all'
+            : defaultTab;
       const targetPage =
         Number.isInteger(pageParam) && pageParam > 0 ? pageParam : 1;
 
@@ -296,7 +341,7 @@ export const DocumentListContainer: React.FC<DocumentListContainerProps> = ({
     return () => {
       window.removeEventListener('popstate', handlePopState);
     };
-  }, [loadDocuments]);
+  }, [defaultTab, fixedTab, loadDocuments]);
 
   /**
    * タブ切り替え時のハンドラー関数。
@@ -308,7 +353,7 @@ export const DocumentListContainer: React.FC<DocumentListContainerProps> = ({
       if (tab === activeTab) return;
       setActiveTab(tab);
       setCurrentPage(1);
-      syncUrlState(tab, 1);
+      syncUrlState(tab, 1, fixedTab);
 
       if (tab === 'mine') {
         if (mineData === null) {
@@ -336,14 +381,14 @@ export const DocumentListContainer: React.FC<DocumentListContainerProps> = ({
     (newPage: number) => {
       if (newPage === currentPage || newPage < 1) return;
       setCurrentPage(newPage);
-      syncUrlState(activeTab, newPage);
+      syncUrlState(activeTab, newPage, fixedTab);
       window.scrollTo({ top: 0, behavior: 'smooth' });
 
       startTransition(() => {
         loadDocuments(activeTab, newPage, myDocumentIds);
       });
     },
-    [activeTab, currentPage, myDocumentIds, loadDocuments],
+    [activeTab, currentPage, fixedTab, myDocumentIds, loadDocuments],
   );
 
   /** 現在選択中のタブに応じたドキュメントレスポンスデータ。 */
@@ -369,57 +414,77 @@ export const DocumentListContainer: React.FC<DocumentListContainerProps> = ({
 
   return (
     <div className="space-y-6">
-      <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
-        <div>
-          <h1 className="text-2xl font-bold tracking-tight text-neutral-100 sm:text-3xl">
-            公開ドキュメント一覧
-          </h1>
-        </div>
+      {!hideHeaderTitle && (
+        <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+          <div>
+            <h1 className="text-2xl font-bold tracking-tight text-neutral-100 sm:text-3xl">
+              公開ドキュメント一覧
+            </h1>
+          </div>
 
-        <a
-          href="/"
-          className="inline-flex items-center justify-center self-start rounded-lg bg-blue-600 px-4 py-2 text-xs font-semibold text-white shadow-sm transition-colors hover:bg-blue-500 focus:ring-2 focus:ring-blue-400 focus:outline-none"
-        >
-          ＋ 新規ドキュメントを公開
-        </a>
-      </div>
+          <a
+            href="/"
+            className="inline-flex items-center justify-center self-start rounded-lg bg-blue-600 px-4 py-2 text-xs font-semibold text-white shadow-sm transition-colors hover:bg-blue-500 focus:ring-2 focus:ring-blue-400 focus:outline-none"
+          >
+            ＋ 新規ドキュメントを公開
+          </a>
+        </div>
+      )}
 
       <div className="flex flex-col gap-3 border-b border-neutral-800 pb-3 sm:flex-row sm:items-center sm:justify-between sm:pb-0">
-        <div className="flex">
-          <button
-            type="button"
-            onClick={() => handleTabChange('all')}
-            className={`flex items-center gap-2 border-b-2 px-4 py-3 text-sm font-medium transition-colors ${
-              activeTab === 'all'
-                ? 'border-blue-500 text-blue-400'
-                : 'border-transparent text-neutral-400 hover:border-neutral-700 hover:text-neutral-200'
-            }`}
-          >
-            <span>すべての公開ドキュメント</span>
-            <span className="rounded-full bg-neutral-800 px-2 py-0.5 font-mono text-xs text-neutral-400">
-              {allData.total}
-            </span>
-          </button>
-
-          <button
-            type="button"
-            onClick={() => handleTabChange('mine')}
-            className={`flex items-center gap-2 border-b-2 px-4 py-3 text-sm font-medium transition-colors ${
-              activeTab === 'mine'
-                ? 'border-blue-500 text-blue-400'
-                : 'border-transparent text-neutral-400 hover:border-neutral-700 hover:text-neutral-200'
-            }`}
-          >
-            <span>自分の投稿</span>
-            {mineData !== null ? (
+        {!fixedTab ? (
+          <div className="flex">
+            <button
+              type="button"
+              onClick={() => handleTabChange('all')}
+              className={`flex items-center gap-2 border-b-2 px-4 py-3 text-sm font-medium transition-colors ${
+                activeTab === 'all'
+                  ? 'border-blue-500 text-blue-400'
+                  : 'border-transparent text-neutral-400 hover:border-neutral-700 hover:text-neutral-200'
+              }`}
+            >
+              <span>すべての公開ドキュメント</span>
               <span className="rounded-full bg-neutral-800 px-2 py-0.5 font-mono text-xs text-neutral-400">
-                {mineData.total}
+                {allData.total}
+              </span>
+            </button>
+
+            <button
+              type="button"
+              onClick={() => handleTabChange('mine')}
+              className={`flex items-center gap-2 border-b-2 px-4 py-3 text-sm font-medium transition-colors ${
+                activeTab === 'mine'
+                  ? 'border-blue-500 text-blue-400'
+                  : 'border-transparent text-neutral-400 hover:border-neutral-700 hover:text-neutral-200'
+              }`}
+            >
+              <span>自分の投稿</span>
+              {mineData !== null ? (
+                <span className="rounded-full bg-neutral-800 px-2 py-0.5 font-mono text-xs text-neutral-400">
+                  {mineData.total}
+                </span>
+              ) : (
+                <span className="h-4 w-5 animate-pulse rounded-full bg-neutral-800" />
+              )}
+            </button>
+          </div>
+        ) : (
+          <div className="flex items-center gap-2 py-2">
+            <span className="text-sm font-semibold text-neutral-200">
+              {fixedTab === 'mine'
+                ? '作成・投稿したドキュメント'
+                : '公開ドキュメント一覧'}
+            </span>
+            {(fixedTab === 'mine' ? mineData : allData) !== null ? (
+              <span className="rounded-full bg-neutral-800 px-2.5 py-0.5 font-mono text-xs font-medium text-neutral-400">
+                {(fixedTab === 'mine' ? mineData?.total : allData.total) ?? 0}{' '}
+                件
               </span>
             ) : (
-              <span className="h-4 w-5 animate-pulse rounded-full bg-neutral-800" />
+              <span className="h-4 w-6 animate-pulse rounded-full bg-neutral-800" />
             )}
-          </button>
-        </div>
+          </div>
+        )}
 
         <div className="relative flex-1 sm:max-w-xs">
           <div className="pointer-events-none absolute inset-y-0 left-0 flex items-center pl-3">

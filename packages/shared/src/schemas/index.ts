@@ -1,8 +1,8 @@
-/**
- * バリデーションスキーマのエクスポート集約。
- */
+/** バリデーションスキーマのエクスポート集約。 */
 
 export * from './upload.ts';
 export * from './document.ts';
 export * from './auth.ts';
 export * from './abuse.ts';
+export * from './pat.ts';
+export * from './mcp.ts';

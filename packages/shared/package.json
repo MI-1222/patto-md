@@ -1,6 +1,6 @@
 {
   "name": "@patto-md/shared",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "private": true,
   "type": "module",
   "sideEffects": false,
@@ -14,6 +14,8 @@
     "./constants/tokens": "./src/constants/tokens.ts",
     "./utils": "./src/utils/index.ts",
     "./utils/token": "./src/utils/token.ts",
+    "./utils/pat": "./src/utils/pat.ts",
+    "./utils/mime": "./src/utils/mime.ts",
     "./*": "./src/*"
   },
   "scripts": {

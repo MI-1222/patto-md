@@ -27,6 +27,12 @@ export type AuthUser = z.infer<typeof authUserSchema>;
 export const authMeResponseSchema = z.object({
   /** ログイン中のユーザー情報(未認証時は `null`)。 */
   user: authUserSchema.nullable(),
+
+  /** PAT認証時に付与されている認可スコープ一覧(セッションCookie認証時は `undefined`)。 */
+  scopes: z.array(z.string()).optional(),
+
+  /** PAT認証時のトークン名(セッションCookie認証時は `undefined`)。 */
+  tokenName: z.string().optional(),
 });
 
 /** 認証セッション情報取得レスポンス型。 */

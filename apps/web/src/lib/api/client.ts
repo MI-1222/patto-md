@@ -1,6 +1,9 @@
 import {
   TURNSTILE_TOKEN_HEADER,
   type AuthUser,
+  type CreatePatRequest,
+  type CreatePatResponse,
+  type DeletePatResponse,
   type DocumentClaimResponse,
   type DocumentCommitRequest,
   type DocumentCommitResponse,
@@ -14,6 +17,7 @@ import {
   type ExpirationPreset,
   type UploadSignFileItem,
   type UploadSignResponse,
+  type UserApiTokenListResponse,
 } from '@patto-md/shared';
 
 /**
@@ -604,19 +608,30 @@ export async function claimDocument(
  * 現在ログイン中ユーザーの情報取得API (`GET /api/auth/me`) を呼び出す。
  *
  * @param baseUrl - 接続先APIのベースURL。
+ * @param customFetch - SSR実行時等に使用するカスタムfetch関数。
+ * @param cookieHeader - SSR実行時に転送するCookie文字列(任意)。
  * @returns ログイン中ユーザー情報。未認証時は `null`。
  */
 export async function fetchCurrentUser(
   baseUrl: string = getApiBaseUrl(),
+  customFetch: typeof fetch = fetch,
+  cookieHeader?: string,
 ): Promise<AuthUser | null> {
   const url = `${baseUrl}/api/auth/me`;
 
+  const requestOptions: RequestInit = {
+    method: 'GET',
+    credentials: 'include',
+  };
+  if (cookieHeader) {
+    requestOptions.headers = {
+      Cookie: cookieHeader,
+    };
+  }
+
   let response: Response;
   try {
-    response = await fetch(url, {
-      method: 'GET',
-      credentials: 'include',
-    });
+    response = await customFetch(url, requestOptions);
   } catch {
     return null;
   }
@@ -713,4 +728,139 @@ export async function reportDocument(
   }
 
   return (await response.json()) as DocumentReportResponse;
+}
+
+/**
+ * ログイン中ユーザーが発行したパーソナルアクセストークン(PAT)一覧を取得する。
+ *
+ * @param baseUrl - 接続先APIのベースURL。
+ * @param customFetch - SSR実行時等に使用するカスタムfetch関数。
+ * @returns 発行済みトークン一覧レスポンス。
+ */
+export async function fetchUserTokens(
+  baseUrl: string = getApiBaseUrl(),
+  customFetch: typeof fetch = fetch,
+): Promise<UserApiTokenListResponse> {
+  const url = `${baseUrl}/api/user/tokens`;
+
+  let response: Response;
+  try {
+    response = await customFetch(url, {
+      method: 'GET',
+      credentials: 'include',
+    });
+  } catch (error) {
+    const detail = error instanceof Error ? error.message : String(error);
+    throw new ApiError(`PAT一覧APIへの接続に失敗しました: ${detail}`, 0);
+  }
+
+  if (!response.ok) {
+    let errorMessage = 'PAT一覧の取得に失敗しました。';
+    try {
+      const errorJson = (await response.json()) as {
+        error?: { message?: string };
+      };
+      if (errorJson.error?.message) {
+        errorMessage = errorJson.error.message;
+      }
+    } catch {
+      // JSONパース失敗時はデフォルトメッセージを使用。
+    }
+    throw new ApiError(errorMessage, response.status);
+  }
+
+  return (await response.json()) as UserApiTokenListResponse;
+}
+
+/**
+ * ログイン中ユーザーに対して新規パーソナルアクセストークン(PAT)を発行する。
+ * 平文トークンは本レスポンスでのみ返却され、以降は二度と取得できない。
+ *
+ * @param payload - 新規発行パラメータ(名前、スコープ配列、有効期限プリセット)。
+ * @param baseUrl - 接続先APIのベースURL。
+ * @param customFetch - SSR実行時等に使用するカスタムfetch関数。
+ * @returns 平文トークンを含む新規発行レスポンス。
+ */
+export async function createUserToken(
+  payload: CreatePatRequest,
+  baseUrl: string = getApiBaseUrl(),
+  customFetch: typeof fetch = fetch,
+): Promise<CreatePatResponse> {
+  const url = `${baseUrl}/api/user/tokens`;
+
+  let response: Response;
+  try {
+    response = await customFetch(url, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+      },
+      credentials: 'include',
+      body: JSON.stringify(payload),
+    });
+  } catch (error) {
+    const detail = error instanceof Error ? error.message : String(error);
+    throw new ApiError(`PAT発行APIへの接続に失敗しました: ${detail}`, 0);
+  }
+
+  if (!response.ok) {
+    let errorMessage = 'PATの発行に失敗しました。';
+    try {
+      const errorJson = (await response.json()) as {
+        error?: { message?: string };
+      };
+      if (errorJson.error?.message) {
+        errorMessage = errorJson.error.message;
+      }
+    } catch {
+      // JSONパース失敗時はデフォルトメッセージを使用。
+    }
+    throw new ApiError(errorMessage, response.status);
+  }
+
+  return (await response.json()) as CreatePatResponse;
+}
+
+/**
+ * 指定されたIDのパーソナルアクセストークン(PAT)を失効・物理削除する。
+ *
+ * @param id - 失効対象トークンの一意識別子(UUID)。
+ * @param baseUrl - 接続先APIのベースURL。
+ * @param customFetch - SSR実行時等に使用するカスタムfetch関数。
+ * @returns 削除完了レスポンス。
+ */
+export async function deleteUserToken(
+  id: string,
+  baseUrl: string = getApiBaseUrl(),
+  customFetch: typeof fetch = fetch,
+): Promise<DeletePatResponse> {
+  const url = `${baseUrl}/api/user/tokens/${encodeURIComponent(id)}`;
+
+  let response: Response;
+  try {
+    response = await customFetch(url, {
+      method: 'DELETE',
+      credentials: 'include',
+    });
+  } catch (error) {
+    const detail = error instanceof Error ? error.message : String(error);
+    throw new ApiError(`PAT失効APIへの接続に失敗しました: ${detail}`, 0);
+  }
+
+  if (!response.ok) {
+    let errorMessage = 'PATの失効に失敗しました。';
+    try {
+      const errorJson = (await response.json()) as {
+        error?: { message?: string };
+      };
+      if (errorJson.error?.message) {
+        errorMessage = errorJson.error.message;
+      }
+    } catch {
+      // JSONパース失敗時はデフォルトメッセージを使用。
+    }
+    throw new ApiError(errorMessage, response.status);
+  }
+
+  return (await response.json()) as DeletePatResponse;
 }
