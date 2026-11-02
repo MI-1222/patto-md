@@ -226,6 +226,62 @@ describe('パーソナルアクセストークン(PAT)管理UIコンポーネン
         expiration: '30days',
       });
     });
+
+    it('キャンセル操作または非表示時にフォーム入力状態が初期値にリセットされる。', async () => {
+      const onClose = vi.fn();
+
+      await act(async () => {
+        root.render(
+          <TokenCreateModal
+            isOpen={true}
+            onClose={onClose}
+            onCreateToken={vi.fn()}
+          />,
+        );
+      });
+
+      const input = container.querySelector<HTMLInputElement>('#token-name');
+      expect(input).not.toBeNull();
+
+      // トークン名を入力。
+      await act(async () => {
+        const nativeSetter = Object.getOwnPropertyDescriptor(
+          window.HTMLInputElement.prototype,
+          'value',
+        )?.set;
+        nativeSetter?.call(input, 'Draft PAT Name');
+        input!.dispatchEvent(new Event('input', { bubbles: true }));
+        input!.dispatchEvent(new Event('change', { bubbles: true }));
+      });
+
+      expect(input?.value).toBe('Draft PAT Name');
+
+      // キャンセルボタンをクリック。
+      const cancelButton = Array.from(
+        container.querySelectorAll('button'),
+      ).find((b) => b.textContent?.includes('キャンセル'));
+      expect(cancelButton).toBeDefined();
+
+      await act(async () => {
+        cancelButton?.click();
+      });
+
+      expect(onClose).toHaveBeenCalledTimes(1);
+
+      // モーダルが再度開かれた際に入力値が空にリセットされていることを確認。
+      await act(async () => {
+        root.render(
+          <TokenCreateModal
+            isOpen={true}
+            onClose={onClose}
+            onCreateToken={vi.fn()}
+          />,
+        );
+      });
+
+      const newInput = container.querySelector<HTMLInputElement>('#token-name');
+      expect(newInput?.value).toBe('');
+    });
   });
 
   describe('TokenRevealModal コンポーネント', () => {

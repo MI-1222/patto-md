@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import {
   MAX_PAT_NAME_LENGTH,
   MIN_PAT_NAME_LENGTH,
@@ -60,6 +60,27 @@ export const TokenCreateModal: React.FC<TokenCreateModalProps> = ({
   const [isSubmitting, setIsSubmitting] = useState<boolean>(false);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
 
+  /** フォーム入力状態およびエラーメッセージを初期値にリセットする。 */
+  const resetForm = () => {
+    setName('');
+    setSelectedScopes(['documents:read', 'documents:write']);
+    setExpiration('30days');
+    setErrorMessage(null);
+  };
+
+  useEffect(() => {
+    if (!isOpen) {
+      resetForm();
+    }
+  }, [isOpen]);
+
+  /** モーダルを閉じる際のハンドラー。 */
+  const handleClose = () => {
+    if (isSubmitting) return;
+    resetForm();
+    onClose();
+  };
+
   if (!isOpen) {
     return null;
   }
@@ -102,9 +123,7 @@ export const TokenCreateModal: React.FC<TokenCreateModalProps> = ({
         scopes: selectedScopes,
         expiration,
       });
-      setName('');
-      setSelectedScopes(['documents:read', 'documents:write']);
-      setExpiration('30days');
+      resetForm();
     } catch (error) {
       setErrorMessage(
         error instanceof Error
@@ -124,7 +143,7 @@ export const TokenCreateModal: React.FC<TokenCreateModalProps> = ({
       className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4 backdrop-blur-sm"
       onClick={(e) => {
         if (e.target === e.currentTarget && !isSubmitting) {
-          onClose();
+          handleClose();
         }
       }}
     >
@@ -138,7 +157,7 @@ export const TokenCreateModal: React.FC<TokenCreateModalProps> = ({
           </h2>
           <button
             type="button"
-            onClick={onClose}
+            onClick={handleClose}
             disabled={isSubmitting}
             className="text-neutral-400 hover:text-neutral-200 disabled:opacity-50"
             aria-label="閉じる"
@@ -260,7 +279,7 @@ export const TokenCreateModal: React.FC<TokenCreateModalProps> = ({
           <div className="flex items-center justify-end gap-3 border-t border-neutral-800 pt-4">
             <button
               type="button"
-              onClick={onClose}
+              onClick={handleClose}
               disabled={isSubmitting}
               className="rounded-lg border border-neutral-700 bg-neutral-800 px-4 py-2 text-xs font-medium text-neutral-300 transition-colors hover:bg-neutral-700 disabled:opacity-50"
             >
