@@ -365,5 +365,55 @@ describe('パーソナルアクセストークン(PAT)管理UIコンポーネン
       expect(container.textContent).toContain('My Agent Token');
       expect(container.textContent).toContain('pmd_pat_...9999');
     });
+
+    it('initialUser が null の場合、マウント時にユーザー解決とトークン取得がそれぞれ1回のみ実行される(二重フェッチ防止)。', async () => {
+      let authCallCount = 0;
+      let tokensCallCount = 0;
+
+      globalThis.fetch = vi.fn().mockImplementation((url: string) => {
+        if (url.includes('/api/auth/me')) {
+          authCallCount += 1;
+          return Promise.resolve({
+            ok: true,
+            status: 200,
+            json: async () => ({ user: mockUser }),
+          } as unknown as Response);
+        }
+        if (url.includes('/api/user/tokens')) {
+          tokensCallCount += 1;
+          return Promise.resolve({
+            ok: true,
+            status: 200,
+            json: async () => ({
+              tokens: [
+                {
+                  id: 'tok-once',
+                  name: 'Once Token',
+                  tokenMasked: 'pmd_pat_...1111',
+                  scopes: ['documents:read'],
+                  expiresAt: null,
+                  lastUsedAt: null,
+                  createdAt: '2026-11-01T00:00:00.000Z',
+                },
+              ],
+            }),
+          } as unknown as Response);
+        }
+        return Promise.reject(new Error(`Unhandled URL: ${url}`));
+      });
+
+      await act(async () => {
+        root.render(
+          <UserTokensContainer
+            apiBaseUrl="http://localhost:8787"
+            initialUser={null}
+          />,
+        );
+      });
+
+      expect(authCallCount).toBe(1);
+      expect(tokensCallCount).toBe(1);
+      expect(container.textContent).toContain('Once Token');
+    });
   });
 });

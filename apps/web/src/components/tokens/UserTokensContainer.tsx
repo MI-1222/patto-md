@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, useRef } from 'react';
 import {
   formatMaskedPat,
   type AuthUser,
@@ -38,6 +38,15 @@ export const UserTokensContainer: React.FC<UserTokensContainerProps> = ({
   const [currentUser, setCurrentUser] = useState<AuthUser | null>(
     initialUser ?? null,
   );
+  const currentUserRef = useRef<AuthUser | null>(initialUser ?? null);
+
+  useEffect(() => {
+    if (initialUser !== undefined) {
+      setCurrentUser(initialUser);
+      currentUserRef.current = initialUser;
+    }
+  }, [initialUser]);
+
   const [tokens, setTokens] = useState<UserApiTokenItem[]>([]);
   const [isLoading, setIsLoading] = useState<boolean>(true);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
@@ -53,6 +62,7 @@ export const UserTokensContainer: React.FC<UserTokensContainerProps> = ({
    * トークン一覧を API から取得する。
    *
    * ユーザー情報が未解決の場合は先に取得する。
+   * `currentUser` を直接参照せず `ref` を経由していることで、ユーザー解決時の再生成によるマウント時二重フェッチが防止される。
    */
   const loadTokens = useCallback(async () => {
     setIsLoading(true);
@@ -60,9 +70,10 @@ export const UserTokensContainer: React.FC<UserTokensContainerProps> = ({
     setIsSessionExpired(false);
 
     try {
-      let user = currentUser;
+      let user = currentUserRef.current;
       if (!user) {
         user = await fetchCurrentUser(apiBaseUrl);
+        currentUserRef.current = user;
         setCurrentUser(user);
       }
 
@@ -94,7 +105,7 @@ export const UserTokensContainer: React.FC<UserTokensContainerProps> = ({
     } finally {
       setIsLoading(false);
     }
-  }, [apiBaseUrl, currentUser]);
+  }, [apiBaseUrl]);
 
   useEffect(() => {
     loadTokens();
