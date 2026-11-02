@@ -36,6 +36,15 @@ describe('MCP Base64 デコード (`decodeBase64Image`)', () => {
 
     assert.strictEqual(Buffer.from(decoded).toString('utf-8'), raw);
   });
+
+  test('改行や空白文字を含む Base64 文字列を正常にデコードできること。', () => {
+    const raw = 'Binary Data With Whitespace And Newlines';
+    const base64 = Buffer.from(raw, 'utf-8').toString('base64');
+    const chunkedBase64 = `  ${base64.slice(0, 10)}\r\n ${base64.slice(10, 20)}\n\t ${base64.slice(20)} \n `;
+    const decoded = decodeBase64Image(chunkedBase64);
+
+    assert.strictEqual(Buffer.from(decoded).toString('utf-8'), raw);
+  });
 });
 
 describe('MCP Markdown アセットパス置換 (`replaceMarkdownAssetPaths`)', () => {

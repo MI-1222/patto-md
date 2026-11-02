@@ -48,6 +48,7 @@ export function sanitizeMcpFileName(
  * Base64 文字列を `Uint8Array` バイナリバッファへ効率的にデコードする。
  *
  * `data:image/png;base64,...` のような Data URL プレフィックスが含まれる場合は除去し、
+ * LLM や一部エンコーダが付与する改行(`\n`, `\r\n`)や空白文字を正規化除去する。
  * Cloudflare Workers の `nodejs_compat` ネイティブ機能である `Buffer.from` を活用して、
  * V8 C++ ネイティブ実装により JavaScript のループを完全に排除して CPU 時間消費を 99% 以上削減する。
  *
@@ -56,10 +57,11 @@ export function sanitizeMcpFileName(
  */
 export function decodeBase64Image(base64Data: string): Uint8Array {
   const commaIndex = base64Data.indexOf(',');
-  const cleanBase64 =
+  const rawBase64 =
     commaIndex !== -1 && commaIndex < 100
-      ? base64Data.slice(commaIndex + 1).trim()
-      : base64Data.trim();
+      ? base64Data.slice(commaIndex + 1)
+      : base64Data;
+  const cleanBase64 = rawBase64.replace(/\s+/g, '');
 
   return Buffer.from(cleanBase64, 'base64');
 }
