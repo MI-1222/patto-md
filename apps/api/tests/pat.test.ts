@@ -9,6 +9,7 @@ import {
   generateCapabilityToken,
   hashToken,
   userApiTokenItemSchema,
+  type AuthMeResponse,
   type AuthUser,
   type CreatePatResponse,
   type DeletePatResponse,
@@ -33,6 +34,7 @@ import {
   createOptionalPatOrTurnstileMiddleware,
   requirePatScope,
 } from '../src/middlewares/pat-auth.ts';
+import { authRouter } from '../src/routes/auth.ts';
 import { documentsRouter } from '../src/routes/documents.ts';
 import { uploadRouter } from '../src/routes/upload.ts';
 import { userTokensRouter } from '../src/routes/user-tokens.ts';
@@ -1323,5 +1325,47 @@ describe('ドキュメント認可・API統合 (PAT とのハイブリッド連�
       res.headers.get('Vary'),
       'Accept-Encoding, Authorization',
     );
+  });
+
+  test('GET /api/auth/me で PAT を付与した場合、PAT所有者のユーザー情報が返却されること。', async () => {
+    const plainToken = generatePat();
+    const hash = await hashPat(plainToken);
+
+    const mockDb = createMockD1Database([
+      {
+        id: 'pat-auth-me',
+        user_id: 'github:user-github-12345',
+        name: 'GitHub PAT',
+        token_hash: hash,
+        scopes: JSON.stringify(['documents:read']),
+        expires_at: null,
+        last_used_at: null,
+        created_at: new Date().toISOString(),
+      },
+    ]);
+
+    const app = new Hono<AppEnv>();
+    app.use('*', async (c, next) => {
+      c.env = {
+        ...c.env,
+        DB: mockDb,
+        JWT_SECRET: TEST_JWT_SECRET,
+      };
+      await next();
+    });
+    app.route('/api/auth', authRouter);
+
+    const res = await app.request('/api/auth/me', {
+      headers: {
+        Authorization: `Bearer ${plainToken}`,
+      },
+    });
+
+    assert.strictEqual(res.status, 200);
+    const body = (await res.json()) as AuthMeResponse;
+    assert.notStrictEqual(body.user, null);
+    assert.strictEqual(body.user?.provider, 'github');
+    assert.strictEqual(body.user?.providerUserId, 'user-github-12345');
+    assert.strictEqual(body.user?.username, 'GitHub PAT');
   });
 });
