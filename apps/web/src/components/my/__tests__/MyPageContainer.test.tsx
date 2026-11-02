@@ -35,12 +35,14 @@ describe('MyPageContainer 画面コンテナの動作検証', () => {
         return Promise.resolve({
           ok: true,
           status: 200,
+          headers: new Headers(),
           json: async () => ({ user: null }),
         } as unknown as Response);
       }
       return Promise.resolve({
         ok: true,
         status: 200,
+        headers: new Headers(),
         json: async () => ({ items: [], tokens: [] }),
       } as unknown as Response);
     });
@@ -156,5 +158,55 @@ describe('MyPageContainer 画面コンテナの動作検証', () => {
     });
 
     expect(container.textContent).toContain('APIトークン設定 (PAT)');
+  });
+
+  it('initialUser が渡されている場合、マウント時に不要なクライアント側認証API呼び出しが行われない。', async () => {
+    window.history.replaceState(null, '', '/my');
+
+    let authMeCallCount = 0;
+    globalThis.fetch = vi.fn().mockImplementation((url: string) => {
+      if (url.includes('/api/auth/me')) {
+        authMeCallCount += 1;
+        return Promise.resolve({
+          ok: true,
+          status: 200,
+          headers: new Headers(),
+          json: async () => ({ user: null }),
+        } as unknown as Response);
+      }
+      return Promise.resolve({
+        ok: true,
+        status: 200,
+        headers: new Headers(),
+        json: async () => ({
+          data: {
+            items: [],
+            total: 0,
+            page: 1,
+            limit: 12,
+            totalPages: 0,
+          },
+        }),
+      } as unknown as Response);
+    });
+
+    const mockUser: AuthUser = {
+      provider: 'github',
+      providerUserId: '999',
+      username: 'Logged-in Dev',
+      avatarUrl: 'https://example.com/avatar.png',
+    };
+
+    await act(async () => {
+      root.render(
+        <MyPageContainer
+          initialData={mockInitialData}
+          apiBaseUrl="http://localhost:8787"
+          initialUser={mockUser}
+        />,
+      );
+    });
+
+    expect(authMeCallCount).toBe(0);
   });
 });

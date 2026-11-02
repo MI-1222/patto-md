@@ -36,6 +36,8 @@ export interface DocumentListContainerProps {
   fixedTab?: DocumentTab;
   /** ヘッダータイトル部分の表示制御(マイページ統合時などに非表示化)。 */
   hideHeaderTitle?: boolean;
+  /** SSR側で解決された初期ログインユーザー情報(任意)。 */
+  initialUser?: AuthUser | null;
 }
 
 /**
@@ -85,6 +87,7 @@ export const DocumentListContainer: React.FC<DocumentListContainerProps> = ({
   defaultTab = 'all',
   fixedTab,
   hideHeaderTitle = false,
+  initialUser,
 }) => {
   const [activeTab, setActiveTab] = useState<DocumentTab>(
     fixedTab ?? defaultTab,
@@ -95,7 +98,15 @@ export const DocumentListContainer: React.FC<DocumentListContainerProps> = ({
   const [isLoading, setIsLoading] = useState<boolean>(false);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
 
-  const [currentUser, setCurrentUser] = useState<AuthUser | null>(null);
+  const [currentUser, setCurrentUser] = useState<AuthUser | null>(
+    initialUser ?? null,
+  );
+
+  useEffect(() => {
+    if (initialUser !== undefined) {
+      setCurrentUser(initialUser);
+    }
+  }, [initialUser]);
   const [allData, setAllData] = useState<DocumentListResponse>(initialData);
   const [mineData, setMineData] = useState<DocumentListResponse | null>(null);
   const [unclaimedDocs, setUnclaimedDocs] = useState<DocumentListItem[]>([]);
@@ -271,11 +282,16 @@ export const DocumentListContainer: React.FC<DocumentListContainerProps> = ({
     }
   };
 
-  // 初回マウント時にローカルストレージ、ログイン状態、およびURLパラメータから初期状態を反映
   useEffect(() => {
-    fetchCurrentUser().then((user) => {
-      setCurrentUser(user);
-    });
+    let resolvedUser = currentUser;
+    if (initialUser !== undefined) {
+      resolvedUser = initialUser;
+      setCurrentUser(initialUser);
+    } else {
+      fetchCurrentUser().then((user) => {
+        setCurrentUser(user);
+      });
+    }
 
     const ids = getMyDocumentIds();
     setMyDocumentIds(ids);
@@ -296,11 +312,10 @@ export const DocumentListContainer: React.FC<DocumentListContainerProps> = ({
     if (targetTab !== 'all' || targetPage !== initialData.page) {
       setActiveTab(targetTab);
       setCurrentPage(targetPage);
-      loadDocuments(targetTab, targetPage, ids);
+      loadDocuments(targetTab, targetPage, ids, resolvedUser);
     }
-  }, [defaultTab, fixedTab, initialData.page, loadDocuments]);
+  }, [defaultTab, fixedTab, initialData.page, initialUser, loadDocuments]);
 
-  // ブラウザの戻る・進む(popstate)操作に連動
   useEffect(() => {
     const handlePopState = () => {
       const params = new URLSearchParams(window.location.search);

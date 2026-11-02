@@ -140,6 +140,7 @@ export const MyPageContainer: React.FC<MyPageContainerProps> = ({
             apiBaseUrl={apiBaseUrl}
             fixedTab="mine"
             hideHeaderTitle={true}
+            initialUser={initialUser}
           />
         ) : (
           <UserTokensContainer
