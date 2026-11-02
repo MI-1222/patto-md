@@ -107,10 +107,13 @@ mcpRouter.post('/', async (c) => {
     version: '1.0.0',
   });
 
-  server.tool(
+  server.registerTool(
     'publish_document',
-    'Markdownドキュメントおよび添付画像を patto-md へ新規公開し、閲覧用パーマリンクURLを発行します。',
-    mcpPublishDocumentSchema.shape,
+    {
+      description:
+        'Markdownドキュメントおよび添付画像を patto-md へ新規公開し、閲覧用パーマリンクURLを発行します。',
+      inputSchema: mcpPublishDocumentSchema.shape,
+    },
     async (params) => {
       if (!patUser.scopes.includes('documents:write')) {
         return {
@@ -365,10 +368,13 @@ mcpRouter.post('/', async (c) => {
     },
   );
 
-  server.tool(
+  server.registerTool(
     'update_document',
-    '既存のドキュメントの Markdown 本文やタイトル、メタデータを更新します。自身の PAT で作成したドキュメントのみ更新可能です。',
-    mcpUpdateDocumentSchema.shape,
+    {
+      description:
+        '既存のドキュメントの Markdown 本文やタイトル、メタデータを更新します。自身の PAT で作成したドキュメントのみ更新可能です。',
+      inputSchema: mcpUpdateDocumentSchema.shape,
+    },
     async (params) => {
       if (!patUser.scopes.includes('documents:write')) {
         return {
@@ -602,10 +608,13 @@ mcpRouter.post('/', async (c) => {
     },
   );
 
-  server.tool(
+  server.registerTool(
     'get_document',
-    '指定されたドキュメントの Markdown 本文原本およびメタデータ、添付ファイル一覧を取得します。',
-    mcpGetDocumentSchema.shape,
+    {
+      description:
+        '指定されたドキュメントの Markdown 本文原本およびメタデータ、添付ファイル一覧を取得します。',
+      inputSchema: mcpGetDocumentSchema.shape,
+    },
     async (params) => {
       if (!patUser.scopes.includes('documents:read')) {
         return {
