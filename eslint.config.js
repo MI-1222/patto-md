@@ -72,9 +72,12 @@ export default [
     },
   },
 
-  // CLI スクリプト用の設定 (標準出力を許可)。
+  // CLI ツールおよびその他スクリプト用の設定 (標準出力を許可)。
   {
-    files: ['apps/api/scripts/**/*.{js,mjs,cjs,ts}'],
+    files: [
+      'apps/api/scripts/**/*.{js,mjs,cjs,ts}',
+      'packages/cli/**/*.{js,mjs,cjs,ts}',
+    ],
     rules: {
       'no-console': 'off',
     },
