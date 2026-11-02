@@ -39,6 +39,9 @@ jobs:
 
       - name: Web アプリのビルド。
         run: pnpm --filter @patto-md/web run build
+        env:
+          PUBLIC_TURNSTILE_SITE_KEY: ${{ vars.PUBLIC_TURNSTILE_SITE_KEY }}
+          PUBLIC_API_URL: https://patto-md-api.mi-1222.workers.dev
 
       - name: Web Worker のデプロイ。
         run: pnpm --filter @patto-md/web run deploy
