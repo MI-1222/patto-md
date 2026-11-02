@@ -58,8 +58,10 @@ export interface WhoamiCommandOptions {
 
 /** ローカルで検出された画像アセット情報の定義。 */
 export interface LocalAssetItem {
-  /** Markdown本文内の元の参照パス。 */
+  /** Markdown本文内の元の参照パス(代表値)。 */
   originalPath: string;
+  /** Markdown本文内で同一の実体ファイルを参照しているすべての元のパス一覧。 */
+  originalPaths: string[];
   /** ローカルファイルシステム上の絶対パス。 */
   absolutePath: string;
   /** ファイル名。 */

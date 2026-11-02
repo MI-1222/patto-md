@@ -116,6 +116,30 @@ describe('Markdown 解析およびアセット抽出 (lib/markdown.ts)', () => {
       expect(result.assets).toHaveLength(0);
       expect(result.missingPaths).toContain('./missing.png');
     });
+
+    it('同一実体ファイルへの複数参照(./img.png と img.png)をユニーク化し重複排除すること。', async () => {
+      const imgPath = path.join(tempDir, 'photo.png');
+      await fs.writeFile(imgPath, Buffer.from('fake-photo-content'));
+
+      const mdContent = `
+# 重複参照テスト
+
+![1回目の参照](./photo.png)
+<img src="photo.png" />
+![3回目の参照](./photo.png "タイトル付き")
+`;
+
+      const result = await extractAndResolveAssets(mdContent, markdownFile);
+
+      // 実体ファイルとしては1件のみ登録されること
+      expect(result.assets).toHaveLength(1);
+      const asset = result.assets[0];
+      expect(asset).toBeDefined();
+      expect(asset?.fileName).toBe('photo.png');
+      // originalPaths に重複せずすべての参照表記が含まれていること
+      expect(asset?.originalPaths).toContain('./photo.png');
+      expect(asset?.originalPaths).toContain('photo.png');
+    });
   });
 
   describe('replaceMarkdownImageUrls', () => {

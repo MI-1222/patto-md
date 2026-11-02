@@ -213,7 +213,13 @@ export async function runPublish(
     await uploadDirectToR2(signedItem.uploadUrl, asset.buffer, asset.mimeType);
 
     const permanentAssetUrl = `/api/assets/${signedItem.r2Key}`;
-    pathMapping.set(asset.originalPath, permanentAssetUrl);
+    const targetPaths =
+      asset.originalPaths && asset.originalPaths.length > 0
+        ? asset.originalPaths
+        : [asset.originalPath];
+    for (const refPath of targetPaths) {
+      pathMapping.set(refPath, permanentAssetUrl);
+    }
 
     attachments.push({
       id: signedItem.fileId,

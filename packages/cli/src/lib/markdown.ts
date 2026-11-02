@@ -131,6 +131,10 @@ export interface ResolvedAssetsResult {
 /**
  * Markdown本文内から相対画像パスを抽出し、ローカルファイル実体を読み込んで検証する。
  *
+ * 同一の実体ファイルへの複数参照(表記ゆれや同一画像の再利用など)は、
+ * ローカル絶対パス(`absolutePath`)をキーとして自動的に重複排除され、
+ * アセット実体ごとにユニーク化された上で参照元パス一覧(`originalPaths`)が紐付けられる。
+ *
  * @param markdownContent - 解析対象のMarkdown本文。
  * @param markdownFilePath - 対象Markdownファイルのローカル絶対パスまたは相対パス。
  * @returns 解決結果(正常アセット、欠落パス、不正パス)。
@@ -160,7 +164,7 @@ export async function extractAndResolveAssets(
     }
   }
 
-  const assets: LocalAssetItem[] = [];
+  const assetMap = new Map<string, LocalAssetItem>();
   const missingPaths: string[] = [];
   const invalidPaths: Array<{ path: string; reason: string }> = [];
 
@@ -189,6 +193,14 @@ export async function extractAndResolveAssets(
       continue;
     }
 
+    const existing = assetMap.get(absolutePath);
+    if (existing) {
+      if (!existing.originalPaths.includes(rawPath)) {
+        existing.originalPaths.push(rawPath);
+      }
+      continue;
+    }
+
     try {
       const stats = await fs.stat(absolutePath);
       if (!stats.isFile()) {
@@ -207,8 +219,9 @@ export async function extractAndResolveAssets(
       const buffer = await fs.readFile(absolutePath);
       const fileName = path.basename(absolutePath);
 
-      assets.push({
+      assetMap.set(absolutePath, {
         originalPath: rawPath,
+        originalPaths: [rawPath],
         absolutePath,
         fileName,
         size: stats.size,
@@ -228,7 +241,7 @@ export async function extractAndResolveAssets(
   }
 
   return {
-    assets,
+    assets: Array.from(assetMap.values()),
     missingPaths,
     invalidPaths,
   };

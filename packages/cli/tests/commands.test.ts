@@ -339,6 +339,113 @@ describe('CLI コマンド実行テスト (commands/*.ts)', () => {
       );
     });
 
+    it('同一画像が複数箇所・表記ゆれで参照されている場合に重複排除して1回のみアップロードすること。', async () => {
+      await writeConfigFile({ token: validToken }, tempConfigFile);
+
+      const imgPath = path.join(tempDir, 'dup.png');
+      await fs.writeFile(imgPath, Buffer.from('fake-dup-bytes'));
+      await fs.writeFile(
+        markdownFile,
+        '# 重複テスト\n\n![参照1](./dup.png)\n\n<img src="dup.png" />\n\n![参照3](./dup.png)',
+      );
+
+      const fetchCalls: Array<{
+        url: string;
+        method: string;
+        body?: BodyInit | null;
+      }> = [];
+
+      globalThis.fetch = vi
+        .fn()
+        .mockImplementation((url: string, init?: RequestInit) => {
+          fetchCalls.push({
+            url,
+            method: init?.method || 'GET',
+            body: init?.body,
+          });
+
+          if (url.includes('/api/upload/sign')) {
+            return Promise.resolve({
+              ok: true,
+              json: async () => ({
+                files: [
+                  {
+                    fileId: 'f-md',
+                    r2Key: 'exp-7d/content.md',
+                    uploadUrl: 'https://r2.example.com/put-md',
+                  },
+                  {
+                    fileId: 'f-img-dup',
+                    r2Key: 'exp-7d/dup.png',
+                    uploadUrl: 'https://r2.example.com/put-dup',
+                  },
+                ],
+              }),
+            });
+          }
+
+          if (init?.method === 'PUT') {
+            return Promise.resolve({ ok: true });
+          }
+
+          if (url.includes('/api/documents')) {
+            return Promise.resolve({
+              ok: true,
+              json: async () => ({
+                id: 'slugdup123',
+                url: '/p/slugdup123',
+                title: '重複テスト',
+                createdAt: new Date().toISOString(),
+              }),
+            });
+          }
+
+          return Promise.resolve({ ok: false, status: 404 });
+        });
+
+      vi.spyOn(console, 'log').mockImplementation(() => {});
+
+      await runPublish(markdownFile, { copy: false });
+
+      expect(process.exitCode).toBeUndefined();
+
+      // 署名リクエストの確認: Markdown 1件 + 画像 1件 のみ (合計2件)
+      const signCall = fetchCalls.find((c) =>
+        c.url.includes('/api/upload/sign'),
+      );
+      expect(signCall).toBeDefined();
+      const signBody = JSON.parse(String(signCall?.body || '{}'));
+      expect(signBody.files).toHaveLength(2);
+      expect(signBody.files[1].name).toBe('dup.png');
+
+      // 画像PUTの回数確認: 1回のみ実行されたこと
+      const imgPuts = fetchCalls.filter(
+        (c) => c.url === 'https://r2.example.com/put-dup' && c.method === 'PUT',
+      );
+      expect(imgPuts).toHaveLength(1);
+
+      // 本文置換の確認: Markdown 内の ./dup.png と dup.png の双方が置換されていること
+      const mdPutCall = fetchCalls.find(
+        (c) => c.url === 'https://r2.example.com/put-md',
+      );
+      expect(mdPutCall).toBeDefined();
+      const uploadedMd = Buffer.from(
+        (mdPutCall?.body as Buffer) || '',
+      ).toString('utf-8');
+      expect(uploadedMd).toContain('![参照1](/api/assets/exp-7d/dup.png)');
+      expect(uploadedMd).toContain('<img src="/api/assets/exp-7d/dup.png" />');
+      expect(uploadedMd).toContain('![参照3](/api/assets/exp-7d/dup.png)');
+
+      // コミット情報の確認: attachments が1件のみであること
+      const commitCall = fetchCalls.find((c) =>
+        c.url.includes('/api/documents'),
+      );
+      expect(commitCall).toBeDefined();
+      const commitPayload = JSON.parse(String(commitCall?.body || '{}'));
+      expect(commitPayload.attachments).toHaveLength(1);
+      expect(commitPayload.attachments[0].r2Key).toBe('exp-7d/dup.png');
+    });
+
     it('--passcode 指定時に visibility が未指定の場合は自動的に protected としてコミットすること。', async () => {
       await writeConfigFile({ token: validToken }, tempConfigFile);
       await fs.writeFile(markdownFile, '# 暗号化\n\nパスコード保護テキスト。');
