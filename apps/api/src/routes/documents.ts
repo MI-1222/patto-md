@@ -35,6 +35,7 @@ import {
   type DocumentUpdateResponse,
   type DocumentVerifyPasscodeResponse,
   type DocumentVisibility,
+  type OwnerProvider,
   SLUG_PATTERN,
   z,
 } from '@patto-md/shared';
@@ -44,6 +45,12 @@ import { extractBearerToken } from '../lib/auth.ts';
 import { calculateDocumentCacheControl } from '../lib/cache.ts';
 import { calculateExpiresAt } from '../lib/date.ts';
 import { hashPasscode, verifyPasscode } from '../lib/passcode.ts';
+import {
+  isPat,
+  parseUserId,
+  safelyGetExecutionCtx,
+  verifyAndResolvePat,
+} from '../lib/pat.ts';
 import {
   checkR2ObjectExists,
   copyAndDeleteR2Object,
@@ -262,6 +269,55 @@ documentsRouter.post(
       passcodeHash = await hashPasscode(passcode);
     }
 
+    let ownerUserId: string | null = null;
+    let ownerProvider: OwnerProvider | null = null;
+
+    const authHeader = c.req.header('Authorization');
+    const bearer = extractBearerToken(authHeader);
+
+    if (bearer && isPat(bearer)) {
+      const patUser = await verifyAndResolvePat({
+        db: c.env.DB,
+        token: bearer,
+        executionCtx: safelyGetExecutionCtx(c),
+      });
+
+      if (!patUser) {
+        return c.json(
+          {
+            error: {
+              message: '無効または有効期限切れのPATトークンです。',
+            },
+          },
+          401,
+        );
+      }
+
+      if (!patUser.scopes.includes('documents:write')) {
+        return c.json(
+          {
+            error: {
+              message:
+                '操作に必要な権限(スコープ: documents:write)がありません。',
+            },
+          },
+          403,
+        );
+      }
+
+      const parsed = parseUserId(patUser.userId);
+      if (parsed) {
+        ownerUserId = parsed.providerUserId;
+        ownerProvider = parsed.provider;
+      }
+    } else {
+      const sessionUser = await resolveSessionUser(c);
+      if (sessionUser) {
+        ownerUserId = sessionUser.providerUserId;
+        ownerProvider = sessionUser.provider;
+      }
+    }
+
     // D1へのアトミックコミット(主キー衝突時は最大3回リトライ)。
     const maxRetries = 3;
     let committedSlug: string | null = null;
@@ -283,9 +339,11 @@ documentsRouter.post(
         modify_token_hash,
         visibility,
         passcode_hash,
+        owner_user_id,
+        owner_provider,
         created_at,
         updated_at
-      ) VALUES (?, ?, ?, ?, 'published', ?, ?, ?, ?, ?, ?, ?)`,
+      ) VALUES (?, ?, ?, ?, 'published', ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       ).bind(
         candidateSlug,
         title,
@@ -296,6 +354,8 @@ documentsRouter.post(
         modifyTokenHash,
         visibility,
         passcodeHash,
+        ownerUserId,
+        ownerProvider,
         createdAt,
         updatedAt,
       );
@@ -426,6 +486,53 @@ documentsRouter.get('/', async (c) => {
   let currentUser = null;
   if (isMine) {
     currentUser = await resolveSessionUser(c);
+    if (!currentUser) {
+      const authHeader = c.req.header('Authorization');
+      const bearer = extractBearerToken(authHeader);
+      if (bearer && isPat(bearer)) {
+        const patUser = await verifyAndResolvePat({
+          db: c.env.DB,
+          token: bearer,
+          executionCtx: safelyGetExecutionCtx(c),
+        });
+
+        if (!patUser) {
+          c.header('Cache-Control', 'no-store');
+          return c.json(
+            {
+              error: {
+                message: '無効または有効期限切れのPATトークンです。',
+              },
+            },
+            401,
+          );
+        }
+
+        if (!patUser.scopes.includes('documents:read')) {
+          c.header('Cache-Control', 'no-store');
+          return c.json(
+            {
+              error: {
+                message:
+                  '操作に必要な権限(スコープ: documents:read)がありません。',
+              },
+            },
+            403,
+          );
+        }
+
+        const parsed = parseUserId(patUser.userId);
+        if (parsed) {
+          currentUser = {
+            provider: parsed.provider,
+            providerUserId: parsed.providerUserId,
+            username: patUser.name,
+            avatarUrl: null,
+          };
+        }
+      }
+    }
+
     if (!currentUser) {
       c.header('Cache-Control', 'no-store');
       return c.json(
@@ -665,6 +772,23 @@ documentsRouter.get('/:id', async (c) => {
         currentUser &&
         currentUser.providerUserId === doc.owner_user_id &&
         currentUser.provider === doc.owner_provider
+      ) {
+        isAuthorized = true;
+      }
+    }
+
+    if (!isAuthorized && bearerToken && isPat(bearerToken)) {
+      const patUser = await verifyAndResolvePat({
+        db: c.env.DB,
+        token: bearerToken,
+        executionCtx: safelyGetExecutionCtx(c),
+      });
+      if (
+        patUser &&
+        patUser.scopes.includes('documents:read') &&
+        doc.owner_user_id &&
+        doc.owner_provider &&
+        `${doc.owner_provider}:${doc.owner_user_id}` === patUser.userId
       ) {
         isAuthorized = true;
       }

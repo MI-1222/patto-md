@@ -14,6 +14,9 @@ export interface UserApiTokenRecord {
   /** トークン平文の SHA-256 ハッシュ値(小文字の Hex 64文字)。 */
   token_hash: string;
 
+  /** トークン平文の末尾4文字(一覧表示・識別用)。 */
+  token_last4: string;
+
   /** 付与された認可スコープの JSON 配列文字列(例: `["documents:read","documents:write"]`)。 */
   scopes: string;
 

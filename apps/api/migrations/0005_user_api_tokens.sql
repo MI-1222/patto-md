@@ -4,6 +4,7 @@ CREATE TABLE IF NOT EXISTS user_api_tokens (
     user_id TEXT NOT NULL,
     name TEXT NOT NULL,
     token_hash TEXT NOT NULL,
+    token_last4 TEXT NOT NULL,
     scopes TEXT NOT NULL,
     expires_at DATETIME,
     last_used_at DATETIME,

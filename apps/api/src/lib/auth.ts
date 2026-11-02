@@ -7,6 +7,7 @@ import {
   verifyTokenHash,
   type CapabilityTokenType,
 } from '@patto-md/shared';
+import { isPat, safelyGetExecutionCtx, verifyAndResolvePat } from './pat.ts';
 import { resolveSessionUser } from '../middlewares/session.ts';
 import type { AppEnv, AuthenticatedDocument } from '../types.ts';
 
@@ -31,15 +32,16 @@ export function extractBearerToken(authHeader?: string | null): string | null {
 /**
  * ドキュメント操作に必要な権限を検証する Hono ミドルウェアを生成する。
  *
- * `Authorization: Bearer <token>` ヘッダー、またはログイン中 OAuth セッションによる所有者照合を行い、
- * D1 データベース内のレコードと照合して認可を判定する。
+ * `Authorization: Bearer <token>` ヘッダー(ケイパビリティトークンまたは PAT)、
+ * またはログイン中 OAuth セッションによる所有者照合を行い、D1 データベース内のレコードと照合して認可を判定する。
  *
  * 対象レコードが存在しない場合や論理削除済み(`status = 'deleted'`)の場合は 404、
  * 規約違反通報により凍結済み(`status = 'suspended'`)の場合は 403 を返却して処理を遮断する。
  *
  * 特権トークン(`edit`)およびドキュメント所有者セッションはすべての操作を認可し、
  * 更新トークン(`modify`)は本文更新権限要求時のみ認可する。
- * 認可成功時はコンテキスト変数へ `authDoc` と `tokenRole` を格納する。
+ * PAT の場合は、トークン所有者とドキュメント所有者の一致に加え、操作に応じたスコープ(`documents:write` または `documents:delete`)を要求する。
+ * 認可成功時はコンテキスト変数へ `authDoc` と `tokenRole`(PAT 認可時は `patUser` も含む)を格納する。
  *
  * @param requiredRole - 必要な最小権限ロール(`edit`: 特権操作 / `modify`: 本文更新)。
  * @returns Hono ミドルウェアハンドラー。
@@ -55,7 +57,12 @@ export function createDocumentAuthMiddleware(
     const authHeader = c.req.header('Authorization');
     const token = extractBearerToken(authHeader);
 
-    if (token && !CAPABILITY_TOKEN_PATTERN.test(token)) {
+    const isPatToken = token ? isPat(token) : false;
+    const isCapabilityToken = token
+      ? CAPABILITY_TOKEN_PATTERN.test(token)
+      : false;
+
+    if (token && !isPatToken && !isCapabilityToken) {
       return c.json(
         {
           error: {
@@ -140,16 +147,81 @@ export function createDocumentAuthMiddleware(
     let matchedRole: CapabilityTokenType | null = null;
 
     if (token) {
-      const isEditMatched = await verifyTokenHash(token, doc.edit_token_hash);
-      if (isEditMatched) {
-        matchedRole = 'edit';
-      } else if (requiredRole === 'modify') {
-        const isModifyMatched = await verifyTokenHash(
+      if (isPatToken) {
+        const patUser = await verifyAndResolvePat({
+          db: c.env.DB,
           token,
-          doc.modify_token_hash,
-        );
-        if (isModifyMatched) {
-          matchedRole = 'modify';
+          executionCtx: safelyGetExecutionCtx(c),
+        });
+
+        if (!patUser) {
+          return c.json(
+            {
+              error: {
+                message: '無効または有効期限切れのPATトークンです。',
+              },
+            },
+            401,
+          );
+        }
+
+        const isDelete = c.req.method === 'DELETE';
+        if (requiredRole === 'modify') {
+          if (!patUser.scopes.includes('documents:write')) {
+            return c.json(
+              {
+                error: {
+                  message:
+                    '操作に必要な権限(スコープ: documents:write)がありません。',
+                },
+              },
+              403,
+            );
+          }
+        } else if (requiredRole === 'edit') {
+          const neededScope = isDelete ? 'documents:delete' : 'documents:write';
+          if (!patUser.scopes.includes(neededScope)) {
+            return c.json(
+              {
+                error: {
+                  message: `操作に必要な権限(スコープ: ${neededScope})がありません。`,
+                },
+              },
+              403,
+            );
+          }
+        }
+
+        const docOwnerId =
+          doc.owner_provider && doc.owner_user_id
+            ? `${doc.owner_provider}:${doc.owner_user_id}`
+            : null;
+
+        if (docOwnerId && docOwnerId === patUser.userId) {
+          matchedRole = requiredRole === 'modify' ? 'modify' : 'edit';
+          c.set('patUser', patUser);
+        } else {
+          return c.json(
+            {
+              error: {
+                message: '操作を行う権限がありません。',
+              },
+            },
+            403,
+          );
+        }
+      } else {
+        const isEditMatched = await verifyTokenHash(token, doc.edit_token_hash);
+        if (isEditMatched) {
+          matchedRole = 'edit';
+        } else if (requiredRole === 'modify') {
+          const isModifyMatched = await verifyTokenHash(
+            token,
+            doc.modify_token_hash,
+          );
+          if (isModifyMatched) {
+            matchedRole = 'modify';
+          }
         }
       }
     }

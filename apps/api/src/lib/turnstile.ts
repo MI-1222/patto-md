@@ -56,7 +56,6 @@ export interface TurnstileMiddlewareOptions {
 export interface TurnstileBindings {
   /** Cloudflare Turnstile シークレットキー。 */
   TURNSTILE_SECRET_KEY?: string;
-  [key: string]: unknown;
 }
 
 /**

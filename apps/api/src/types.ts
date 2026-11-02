@@ -5,6 +5,7 @@ import type {
   CapabilityTokenType,
   DocumentVisibility,
   OwnerProvider,
+  TokenScope,
 } from '@patto-md/shared';
 
 /**
@@ -74,6 +75,18 @@ export interface AuthenticatedDocument {
 /** 認証トークンにより認可されたロール(`edit` または `modify`)。 */
 export type CapabilityTokenRole = CapabilityTokenType;
 
+/** PAT認可ミドルウェアによって解決されたトークン情報。 */
+export interface PatAuthContext {
+  /** トークンレコードの一意識別子(UUID)。 */
+  tokenId: string;
+  /** 不変ユーザー識別子(`${provider}:${providerUserId}`)。 */
+  userId: string;
+  /** トークンの識別表示名。 */
+  name: string;
+  /** 付与された認可スコープ配列。 */
+  scopes: TokenScope[];
+}
+
 /** Hono アプリケーションで使用する環境定義型。 */
 export type AppEnv = {
   Bindings: AppBindings;
@@ -84,5 +97,7 @@ export type AppEnv = {
     tokenRole?: CapabilityTokenRole;
     /** 認証セッションミドルウェアによって検証・解決されたログインユーザー情報。 */
     user?: AuthUser | null;
+    /** PAT認可ミドルウェアによって解決されたPATユーザー情報。 */
+    patUser?: PatAuthContext | null;
   };
 };

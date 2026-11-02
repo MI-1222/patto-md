@@ -125,3 +125,19 @@ export function maskPat(token: string): string {
   const suffix = token.slice(-4);
   return `${PATTO_PAT_PREFIX}...${suffix}`;
 }
+
+/**
+ * トークンの末尾4文字から表示用のマスク文字列を生成する。
+ *
+ * 発行済み PAT 一覧の取得時など、平文を保持せず末尾4文字のみを保持している場合に利用する。
+ * 引数 `last4` が空文字または空白のみの場合は、プレフィックスのみのマスク文字列(`pmd_pat_...`)を返却する。
+ *
+ * @param last4 - 平文トークンの末尾4文字。
+ * @returns マスクされた表示用文字列(例: `pmd_pat_...a1b2`)。
+ */
+export function formatMaskedPat(last4: string): string {
+  if (!last4 || typeof last4 !== 'string' || last4.trim().length === 0) {
+    return `${PATTO_PAT_PREFIX}...`;
+  }
+  return `${PATTO_PAT_PREFIX}...${last4.trim().slice(-4)}`;
+}

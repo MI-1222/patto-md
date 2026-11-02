@@ -6,6 +6,7 @@ import { documentsRouter } from './routes/documents';
 import { uploadRouter } from './routes/upload';
 import { assetsRouter } from './routes/assets';
 import { authRouter } from './routes/auth';
+import { userTokensRouter } from './routes/user-tokens';
 import { resolveAllowedOrigin } from './lib/cors';
 import type { AppEnv } from './types';
 
@@ -97,5 +98,8 @@ app.route('/api/assets', assetsRouter);
 
 /** OAuth認証関連APIサブルーターのマウント。 */
 app.route('/api/auth', authRouter);
+
+/** PAT管理関連APIサブルーターのマウント。 */
+app.route('/api/user/tokens', userTokensRouter);
 
 export default app;
