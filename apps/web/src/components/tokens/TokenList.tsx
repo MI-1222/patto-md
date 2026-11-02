@@ -76,7 +76,19 @@ function getExpirationStatus(expiresAt: string | null): {
     return { label: '期限切れ', isExpired: true, isWarning: false };
   }
 
-  const diffDays = Math.ceil((expireTime - now) / (1000 * 60 * 60 * 24));
+  const diffMs = expireTime - now;
+  const diffMinutes = Math.floor(diffMs / (1000 * 60));
+  const diffHours = Math.floor(diffMs / (1000 * 60 * 60));
+  const diffDays = Math.ceil(diffMs / (1000 * 60 * 60 * 24));
+
+  if (diffHours < 24) {
+    const label =
+      diffHours > 0
+        ? `残り${diffHours}時間`
+        : `残り${Math.max(1, diffMinutes)}分`;
+    return { label, isExpired: false, isWarning: true };
+  }
+
   if (diffDays <= 7) {
     return { label: `残り${diffDays}日`, isExpired: false, isWarning: true };
   }

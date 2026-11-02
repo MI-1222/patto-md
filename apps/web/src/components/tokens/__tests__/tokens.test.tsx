@@ -111,6 +111,43 @@ describe('パーソナルアクセストークン(PAT)管理UIコンポーネン
       expect(container.textContent).toContain('未使用');
     });
 
+    it('有効期限が24時間未満の場合は時間・分単位で残り時間を表示する。', async () => {
+      const expiringTokens: UserApiTokenItem[] = [
+        {
+          id: 'token-hours',
+          name: 'Hours Token',
+          tokenMasked: 'pmd_pat_...2222',
+          scopes: ['documents:read'],
+          expiresAt: new Date(Date.now() + 1000 * 60 * 60 * 3).toISOString(),
+          lastUsedAt: null,
+          createdAt: new Date().toISOString(),
+        },
+        {
+          id: 'token-minutes',
+          name: 'Minutes Token',
+          tokenMasked: 'pmd_pat_...3333',
+          scopes: ['documents:read'],
+          expiresAt: new Date(Date.now() + 1000 * 60 * 25).toISOString(),
+          lastUsedAt: null,
+          createdAt: new Date().toISOString(),
+        },
+      ];
+
+      await act(async () => {
+        root.render(
+          <TokenList
+            tokens={expiringTokens}
+            onDeleteToken={vi.fn()}
+            onCreateClick={vi.fn()}
+            isDeletingId={null}
+          />,
+        );
+      });
+
+      expect(container.textContent).toContain('残り3時間');
+      expect(container.textContent).toContain('残り25分');
+    });
+
     it('失効ボタンをクリックすると行内にインライン確認UIが展開され、失効できる。', async () => {
       const onCreateClick = vi.fn();
       const onDeleteToken = vi.fn().mockResolvedValue(undefined);
