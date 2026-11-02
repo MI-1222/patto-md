@@ -2,4 +2,5 @@
 export * from './TokenList';
 export * from './TokenCreateModal';
 export * from './TokenRevealModal';
+export * from './ClientSetupGuide';
 export * from './UserTokensContainer';

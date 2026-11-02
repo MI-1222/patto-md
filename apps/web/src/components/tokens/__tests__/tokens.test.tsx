@@ -5,6 +5,7 @@ import { createRoot, type Root } from 'react-dom/client';
 import { TokenList } from '../TokenList';
 import { TokenCreateModal } from '../TokenCreateModal';
 import { TokenRevealModal } from '../TokenRevealModal';
+import { ClientSetupGuide } from '../ClientSetupGuide';
 import { UserTokensContainer } from '../UserTokensContainer';
 import type {
   AuthUser,
@@ -536,6 +537,85 @@ describe('パーソナルアクセストークン(PAT)管理UIコンポーネン
       expect(authCallCount).toBe(1);
       expect(tokensCallCount).toBe(1);
       expect(container.textContent).toContain('Once Token');
+    });
+  });
+
+  describe('ClientSetupGuide コンポーネント', () => {
+    it('トークンが渡された場合に CLI ログインコマンド内に埋め込まれ、コピーできること。', async () => {
+      const writeTextMock = vi.fn().mockResolvedValue(undefined);
+      Object.defineProperty(navigator, 'clipboard', {
+        value: {
+          writeText: writeTextMock,
+        },
+        configurable: true,
+      });
+
+      const sampleToken = 'pmd_pat_sample1234567890abcdef1234567890abcdef123';
+
+      await act(async () => {
+        root.render(
+          <ClientSetupGuide
+            token={sampleToken}
+            apiBaseUrl="https://api.patto.example.com"
+          />,
+        );
+      });
+
+      expect(container.textContent).toContain('外部クライアント設定ガイド');
+      expect(container.textContent).toContain(
+        `npx @patto-md/cli login --token ${sampleToken}`,
+      );
+
+      const copyBtn = Array.from(container.querySelectorAll('button')).find(
+        (b) => b.textContent?.includes('コピー'),
+      );
+
+      await act(async () => {
+        copyBtn?.click();
+      });
+
+      expect(writeTextMock).toHaveBeenCalledWith(
+        `npx @patto-md/cli login --token ${sampleToken}`,
+      );
+    });
+
+    it('タブを MCP に切り替えると Claude等 向け設定スニペットが表示されること。', async () => {
+      const sampleToken = 'pmd_pat_sample1234567890abcdef1234567890abcdef123';
+
+      await act(async () => {
+        root.render(
+          <ClientSetupGuide
+            token={sampleToken}
+            apiBaseUrl="https://api.patto.example.com"
+          />,
+        );
+      });
+
+      const mcpTabBtn = Array.from(container.querySelectorAll('button')).find(
+        (b) => b.textContent?.includes('MCP'),
+      );
+
+      await act(async () => {
+        mcpTabBtn?.click();
+      });
+
+      expect(container.textContent).toContain('"patto-md": {');
+      expect(container.textContent).toContain(
+        '"url": "https://api.patto.example.com/api/mcp"',
+      );
+      expect(container.textContent).toContain(
+        `"Authorization": "Bearer ${sampleToken}"`,
+      );
+    });
+
+    it('トークン未指定時はプレースホルダーが表示されること。', async () => {
+      await act(async () => {
+        root.render(<ClientSetupGuide />);
+      });
+
+      expect(container.textContent).toContain(
+        'npx @patto-md/cli login --token <YOUR_PAT>',
+      );
     });
   });
 });

@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
 import type { CreatePatResponse } from '@patto-md/shared';
 import { CheckIcon, CopyIcon } from '../svg/ActionIcons';
+import { ClientSetupGuide } from './ClientSetupGuide';
 
 /** ワンタイム平文トークン表示モーダルの `props` 定義。 */
 export interface TokenRevealModalProps {
@@ -52,7 +53,7 @@ export const TokenRevealModal: React.FC<TokenRevealModalProps> = ({
       aria-labelledby="reveal-token-title"
       className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 p-4 backdrop-blur-sm"
     >
-      <div className="w-full max-w-lg rounded-2xl border border-neutral-700 bg-neutral-900 p-6 shadow-2xl">
+      <div className="max-h-[90vh] w-full max-w-xl overflow-y-auto rounded-2xl border border-neutral-700 bg-neutral-900 p-6 shadow-2xl">
         <div className="flex items-center gap-3 border-b border-neutral-800 pb-4">
           <div className="rounded-full bg-emerald-500/10 p-2 text-emerald-400">
             <CheckIcon className="size-5" />
@@ -149,6 +150,8 @@ export const TokenRevealModal: React.FC<TokenRevealModalProps> = ({
             </span>
           </div>
         </div>
+
+        <ClientSetupGuide token={token.token} compact />
 
         <div className="mt-6 flex justify-end border-t border-neutral-800 pt-4">
           <button

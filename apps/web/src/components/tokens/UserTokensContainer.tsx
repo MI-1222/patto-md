@@ -17,6 +17,7 @@ import { KeyIcon } from '../svg/ActionIcons';
 import { TokenCreateModal } from './TokenCreateModal';
 import { TokenList } from './TokenList';
 import { TokenRevealModal } from './TokenRevealModal';
+import { ClientSetupGuide } from './ClientSetupGuide';
 
 /** トークン管理コンテナの `props` 定義。 */
 export interface UserTokensContainerProps {
@@ -271,6 +272,8 @@ export const UserTokensContainer: React.FC<UserTokensContainerProps> = ({
           isDeletingId={isDeletingId}
         />
       )}
+
+      <ClientSetupGuide apiBaseUrl={apiBaseUrl} />
 
       <TokenCreateModal
         isOpen={isCreateOpen}
