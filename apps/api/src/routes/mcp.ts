@@ -25,6 +25,7 @@ import { calculateExpiresAt } from '../lib/date.ts';
 import {
   decodeBase64Image,
   replaceMarkdownAssetPaths,
+  resolvePublicUrl,
   sanitizeMcpFileName,
   type AssetPathMapping,
 } from '../lib/mcp.ts';
@@ -339,10 +340,11 @@ mcpRouter.post('/', async (c) => {
         };
       }
 
-      const baseUrl =
-        c.env.FRONTEND_ORIGIN ||
-        new URL(c.req.url).origin.replace(/\/api\/mcp|\/mcp$/, '');
-      const publicUrl = `${baseUrl}/p/${committedSlug}`;
+      const publicUrl = resolvePublicUrl(
+        c.req.url,
+        c.env.FRONTEND_ORIGIN,
+        committedSlug,
+      );
 
       return {
         content: [
@@ -586,10 +588,7 @@ mcpRouter.post('/', async (c) => {
         };
       }
 
-      const baseUrl =
-        c.env.FRONTEND_ORIGIN ||
-        new URL(c.req.url).origin.replace(/\/api\/mcp|\/mcp$/, '');
-      const publicUrl = `${baseUrl}/p/${id}`;
+      const publicUrl = resolvePublicUrl(c.req.url, c.env.FRONTEND_ORIGIN, id);
 
       return {
         content: [
@@ -742,10 +741,7 @@ mcpRouter.post('/', async (c) => {
         assetUrl: `/api/assets/${att.r2_key}`,
       }));
 
-      const baseUrl =
-        c.env.FRONTEND_ORIGIN ||
-        new URL(c.req.url).origin.replace(/\/api\/mcp|\/mcp$/, '');
-      const publicUrl = `${baseUrl}/p/${id}`;
+      const publicUrl = resolvePublicUrl(c.req.url, c.env.FRONTEND_ORIGIN, id);
 
       return {
         content: [

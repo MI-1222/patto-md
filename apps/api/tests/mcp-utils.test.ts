@@ -3,6 +3,7 @@ import test, { describe } from 'node:test';
 import {
   decodeBase64Image,
   replaceMarkdownAssetPaths,
+  resolvePublicUrl,
   sanitizeMcpFileName,
 } from '../src/lib/mcp.ts';
 
@@ -72,5 +73,34 @@ describe('MCP Markdown アセットパス置換 (`replaceMarkdownAssetPaths`)', 
       result.includes('![サブ](/api/assets/exp-7d/uploads/uuid-2/sub.png)'),
       true,
     );
+  });
+});
+
+describe('MCP 公開 URL 解決 (`resolvePublicUrl`)', () => {
+  test('環境変数 `FRONTEND_ORIGIN` が設定されている場合は優先して使用すること。', () => {
+    const url = resolvePublicUrl(
+      'https://api.example.com/api/mcp',
+      'https://patto.example.com',
+      'abc123xyz789',
+    );
+    assert.strictEqual(url, 'https://patto.example.com/p/abc123xyz789');
+  });
+
+  test('`FRONTEND_ORIGIN` の末尾スラッシュを正規化して除去すること。', () => {
+    const url = resolvePublicUrl(
+      'https://api.example.com/api/mcp',
+      'https://patto.example.com///',
+      'abc123xyz789',
+    );
+    assert.strictEqual(url, 'https://patto.example.com/p/abc123xyz789');
+  });
+
+  test('`FRONTEND_ORIGIN` 未指定時はリクエスト URL のオリジンから導出すること。', () => {
+    const url = resolvePublicUrl(
+      'https://patto-md.workers.dev/api/mcp',
+      undefined,
+      'abc123xyz789',
+    );
+    assert.strictEqual(url, 'https://patto-md.workers.dev/p/abc123xyz789');
   });
 });

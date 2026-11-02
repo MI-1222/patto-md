@@ -123,3 +123,27 @@ export function replaceMarkdownAssetPaths(
 
   return result;
 }
+
+/**
+ * ドキュメントの公開用パーマリンク URL を解決する。
+ *
+ * 環境変数 `FRONTEND_ORIGIN` が指定されている場合は優先して採用し、
+ * 未指定時はリクエスト URL のオリジンからベース URL を導出する。
+ * 末尾のスラッシュは正規化して取り除く。
+ *
+ * @param reqUrl - リクエストの完全な URL 文字列。
+ * @param frontendOrigin - 環境変数等で指定されたフロントエンドのオリジン(任意)。
+ * @param slug - ドキュメントの識別子(`Slug`)。
+ * @returns 完全なドキュメント公開 URL。
+ */
+export function resolvePublicUrl(
+  reqUrl: string,
+  frontendOrigin: string | undefined,
+  slug: string,
+): string {
+  const base = frontendOrigin
+    ? frontendOrigin.replace(/\/+$/, '')
+    : new URL(reqUrl).origin.replace(/\/api\/mcp|\/mcp$/, '');
+
+  return `${base}/p/${slug}`;
+}
