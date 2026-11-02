@@ -606,6 +606,23 @@ mcpRouter.post('/', async (c) => {
         id,
       );
 
+      const existingAttachments = await c.env.DB.prepare(
+        'SELECT id, r2_key FROM attachments WHERE document_id = ?',
+      )
+        .bind(id)
+        .all<{ id: string; r2_key: string }>();
+
+      const unusedAttachmentIds: string[] = [];
+      for (const att of existingAttachments.results ?? []) {
+        if (!finalMarkdown.includes(att.r2_key)) {
+          unusedAttachmentIds.push(att.id);
+        }
+      }
+
+      const deleteUnusedStatements = unusedAttachmentIds.map((attId) =>
+        c.env.DB.prepare('DELETE FROM attachments WHERE id = ?').bind(attId),
+      );
+
       const attachmentStatements = newAttachments.map((att) => {
         return c.env.DB.prepare(
           `INSERT INTO attachments (
@@ -629,7 +646,11 @@ mcpRouter.post('/', async (c) => {
       });
 
       try {
-        await c.env.DB.batch([updateDocStatement, ...attachmentStatements]);
+        await c.env.DB.batch([
+          updateDocStatement,
+          ...deleteUnusedStatements,
+          ...attachmentStatements,
+        ]);
       } catch (error) {
         console.error('MCP D1 更新エラー:', error);
         return {

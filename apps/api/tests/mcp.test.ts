@@ -302,6 +302,12 @@ function createMockD1Database(
             doc.passcode_hash = passcodeHash;
             doc.updated_at = updatedAt;
           }
+        } else if (sql.includes('DELETE FROM attachments WHERE id = ?')) {
+          const [attId] = params as [string];
+          const idx = attachmentStore.findIndex((a) => a.id === attId);
+          if (idx !== -1) {
+            attachmentStore.splice(idx, 1);
+          }
         }
       }
       return [];
@@ -1045,6 +1051,62 @@ describe('MCP update_document ツール', () => {
     // D1 タイトルが更新されていること。
     const doc = mockDb._docStore.find((d) => d.id === TARGET_DOC_ID);
     assert.strictEqual(doc?.title, '更新後タイトル');
+  });
+
+  test('本文更新により参照されなくなった古い添付ファイルレコードが削除され、継続参照されるレコードは保持されること。', async () => {
+    // 既存の添付レコードを2件登録 (1件は継続参照、1件は本文から削除)
+    mockDb._attachmentStore.push(
+      {
+        id: 'att-kept',
+        document_id: TARGET_DOC_ID,
+        file_name: 'kept.png',
+        file_size: 1024,
+        mime_type: 'image/png',
+        r2_key: 'exp-7d/uploads/uuid-up/kept.png',
+        created_at: new Date().toISOString(),
+      },
+      {
+        id: 'att-removed',
+        document_id: TARGET_DOC_ID,
+        file_name: 'removed.png',
+        file_size: 2048,
+        mime_type: 'image/png',
+        r2_key: 'exp-7d/uploads/uuid-up/removed.png',
+        created_at: new Date().toISOString(),
+      },
+    );
+
+    // kept.png のみを含み、removed.png を含まない本文で更新
+    const res = await app.request('/api/mcp', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${TEST_VALID_PAT_ALL}`,
+      },
+      body: JSON.stringify({
+        jsonrpc: '2.0',
+        id: 301,
+        method: 'tools/call',
+        params: {
+          name: 'update_document',
+          arguments: {
+            id: TARGET_DOC_ID,
+            content:
+              '# 更新ドキュメント\n\n![継続画像](/api/assets/exp-7d/uploads/uuid-up/kept.png)',
+          },
+        },
+      }),
+    });
+
+    assert.strictEqual(res.status, 200);
+
+    // 添付ファイルテーブルの検証
+    const remainingAttIds = mockDb._attachmentStore
+      .filter((a) => a.document_id === TARGET_DOC_ID)
+      .map((a) => a.id);
+
+    assert.strictEqual(remainingAttIds.includes('att-kept'), true);
+    assert.strictEqual(remainingAttIds.includes('att-removed'), false);
   });
 
   test('他人の PAT で更新しようとした場合に IDOR 防御により拒絶されること。', async () => {
