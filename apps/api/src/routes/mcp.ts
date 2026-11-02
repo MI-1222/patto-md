@@ -12,8 +12,6 @@
 
 import {
   MAX_SINGLE_FILE_SIZE,
-  generateCapabilityToken,
-  hashToken,
   mcpGetDocumentSchema,
   mcpPublishDocumentSchema,
   mcpUpdateDocumentSchema,
@@ -21,7 +19,6 @@ import {
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { WebStandardStreamableHTTPServerTransport } from '@modelcontextprotocol/sdk/server/webStandardStreamableHttp.js';
 import { Hono } from 'hono';
-import { calculateExpiresAt } from '../lib/date.ts';
 import {
   decodeBase64Image,
   replaceMarkdownAssetPaths,
@@ -36,7 +33,7 @@ import {
   getR2Text,
   resolveDocumentExpectedPrefix,
 } from '../lib/r2.ts';
-import { generateSlug } from '../lib/slug.ts';
+import { createDocument, SlugCollisionError } from '../lib/document-store.ts';
 import { createPatAuthMiddleware } from '../middlewares/pat-auth.ts';
 import type { AppEnv, AuthenticatedDocument } from '../types.ts';
 
@@ -142,8 +139,6 @@ mcpRouter.post('/', async (c) => {
       const docUuid = crypto.randomUUID();
       const contentR2Key = `${expectedPrefix}uploads/${docUuid}/content.md`;
       const createdAt = new Date().toISOString();
-      const updatedAt = createdAt;
-      const expiresAt = calculateExpiresAt(expiration, new Date(createdAt));
 
       const pathMappings: AssetPathMapping[] = [];
       const attachmentRecords: Array<{
@@ -247,119 +242,44 @@ mcpRouter.post('/', async (c) => {
         };
       }
 
-      const editToken = generateCapabilityToken('edit');
-      const modifyToken = generateCapabilityToken('modify');
-      const [editTokenHash, modifyTokenHash] = await Promise.all([
-        hashToken(editToken),
-        hashToken(modifyToken),
-      ]);
-
-      let passcodeHash: string | null = null;
-      if (visibility === 'protected' && passcode) {
-        passcodeHash = await hashPasscode(passcode);
-      }
-
       const parsedUser = parseUserId(patUser.userId);
       const ownerUserId = parsedUser?.providerUserId ?? null;
       const ownerProvider = parsedUser?.provider ?? null;
 
-      const maxRetries = 3;
-      let committedSlug: string | null = null;
-
-      for (let attempt = 0; attempt < maxRetries; attempt++) {
-        const candidateSlug = generateSlug();
-
-        const docStatement = c.env.DB.prepare(
-          `INSERT INTO documents (
-            id,
-            title,
-            description,
-            content_r2_key,
-            status,
-            expires_at,
-            edit_token_hash,
-            modify_token_hash,
-            visibility,
-            passcode_hash,
-            owner_user_id,
-            owner_provider,
-            created_at,
-            updated_at
-          ) VALUES (?, ?, ?, ?, 'published', ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-        ).bind(
-          candidateSlug,
+      let createResult;
+      try {
+        createResult = await createDocument(c.env.DB, {
           title,
-          description ?? null,
+          description,
           contentR2Key,
-          expiresAt,
-          editTokenHash,
-          modifyTokenHash,
+          expiration,
           visibility,
-          passcodeHash,
+          passcode,
           ownerUserId,
           ownerProvider,
+          attachments: attachmentRecords,
           createdAt,
-          updatedAt,
-        );
-
-        const attachmentStatements = attachmentRecords.map((att) => {
-          return c.env.DB.prepare(
-            `INSERT INTO attachments (
-              id,
-              document_id,
-              file_name,
-              file_size,
-              mime_type,
-              r2_key,
-              created_at
-            ) VALUES (?, ?, ?, ?, ?, ?, ?)`,
-          ).bind(
-            att.id,
-            candidateSlug,
-            att.fileName,
-            att.fileSize,
-            att.mimeType,
-            att.r2Key,
-            createdAt,
-          );
         });
-
-        try {
-          await c.env.DB.batch([docStatement, ...attachmentStatements]);
-          committedSlug = candidateSlug;
-          break;
-        } catch (error) {
-          const errorMessage =
-            error instanceof Error ? error.message : String(error);
-          if (
-            errorMessage.includes('UNIQUE constraint failed') ||
-            errorMessage.includes('PRIMARY KEY')
-          ) {
-            console.warn(
-              `MCP Slug衝突を検知(${candidateSlug})。再試行中(${attempt + 1}/${maxRetries})...`,
-            );
-            continue;
-          }
-          console.error('MCP D1 書き込みエラー:', error);
+      } catch (error) {
+        if (error instanceof SlugCollisionError) {
           return {
             isError: true,
             content: [
               {
                 type: 'text',
-                text: 'ドキュメント情報の永続化に失敗しました。',
+                text: 'ドキュメントIDの採番に失敗しました。時間をおいて再試行してください。',
               },
             ],
           };
         }
-      }
 
-      if (!committedSlug) {
+        console.error('MCP D1 書き込みエラー:', error);
         return {
           isError: true,
           content: [
             {
               type: 'text',
-              text: 'ドキュメントIDの採番に失敗しました。時間をおいて再試行してください。',
+              text: 'ドキュメント情報の永続化に失敗しました。',
             },
           ],
         };
@@ -368,7 +288,7 @@ mcpRouter.post('/', async (c) => {
       const publicUrl = resolvePublicUrl(
         c.req.url,
         c.env.FRONTEND_ORIGIN,
-        committedSlug,
+        createResult.slug,
       );
 
       return {
@@ -380,9 +300,9 @@ mcpRouter.post('/', async (c) => {
               '',
               `- タイトル: ${title}`,
               `- 公開URL: ${publicUrl}`,
-              `- ドキュメントID: ${committedSlug}`,
+              `- ドキュメントID: ${createResult.slug}`,
               `- 公開範囲: ${visibility}`,
-              `- 有効期限: ${expiresAt ?? '無期限'}`,
+              `- 有効期限: ${createResult.expiresAt ?? '無期限'}`,
               images.length > 0 ? `- 添付画像数: ${images.length}件` : null,
               '',
               'このパーマリンクを共有することでWebブラウザから閲覧可能です。',

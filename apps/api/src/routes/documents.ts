@@ -5,8 +5,6 @@ import {
   documentReportRequestSchema,
   documentUpdateRequestSchema,
   documentVerifyPasscodeRequestSchema,
-  generateCapabilityToken,
-  hashToken,
   RATE_LIMIT_DOCUMENT_CLAIM_LIMIT,
   RATE_LIMIT_DOCUMENT_CLAIM_WINDOW_SECONDS,
   RATE_LIMIT_DOCUMENT_COMMIT_LIMIT,
@@ -58,7 +56,7 @@ import {
 } from '../lib/r2.ts';
 import { getClientIp } from '../lib/rate-limit.ts';
 import { hashClientIp } from '../lib/ip-hash.ts';
-import { generateSlug } from '../lib/slug.ts';
+import { createDocument, SlugCollisionError } from '../lib/document-store.ts';
 import {
   buildPasscodeSetCookieHeader,
   createViewToken,
@@ -248,23 +246,6 @@ documentsRouter.post(
       );
     }
 
-    // 作成日時および有効期限日時の決定(ISO 8601形式で統一)。
-    const createdAt = new Date().toISOString();
-    const updatedAt = createdAt;
-    const expiresAt = calculateExpiresAt(expiration, new Date(createdAt));
-
-    const editToken = generateCapabilityToken('edit');
-    const modifyToken = generateCapabilityToken('modify');
-    const [editTokenHash, modifyTokenHash] = await Promise.all([
-      hashToken(editToken),
-      hashToken(modifyToken),
-    ]);
-
-    let passcodeHash: string | null = null;
-    if (visibility === 'protected' && passcode) {
-      passcodeHash = await hashPasscode(passcode);
-    }
-
     let ownerUserId: string | null = null;
     let ownerProvider: OwnerProvider | null = null;
 
@@ -310,111 +291,37 @@ documentsRouter.post(
       }
     }
 
-    // D1へのアトミックコミット(主キー衝突時は最大3回リトライ)。
-    const maxRetries = 3;
-    let committedSlug: string | null = null;
-    let lastError: unknown = null;
-
-    for (let attempt = 0; attempt < maxRetries; attempt++) {
-      const candidateSlug = generateSlug();
-
-      // ドキュメント本体の登録ステートメント。
-      const documentStatement = c.env.DB.prepare(
-        `INSERT INTO documents (
-        id,
+    // D1 へのドキュメント永続化および Slug 採番。
+    let createResult;
+    try {
+      createResult = await createDocument(c.env.DB, {
         title,
         description,
-        content_r2_key,
-        status,
-        expires_at,
-        edit_token_hash,
-        modify_token_hash,
-        visibility,
-        passcode_hash,
-        owner_user_id,
-        owner_provider,
-        created_at,
-        updated_at
-      ) VALUES (?, ?, ?, ?, 'published', ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-      ).bind(
-        candidateSlug,
-        title,
-        description ?? null,
         contentR2Key,
-        expiresAt,
-        editTokenHash,
-        modifyTokenHash,
+        expiration,
         visibility,
-        passcodeHash,
+        passcode,
         ownerUserId,
         ownerProvider,
-        createdAt,
-        updatedAt,
-      );
-
-      // 添付ファイル群の登録ステートメント配列(外部キー順序を担保)。
-      const attachmentStatements = attachments.map((attachment) => {
-        return c.env.DB.prepare(
-          `INSERT INTO attachments (
-          id,
-          document_id,
-          file_name,
-          file_size,
-          mime_type,
-          r2_key,
-          created_at
-        ) VALUES (?, ?, ?, ?, ?, ?, ?)`,
-        ).bind(
-          attachment.id,
-          candidateSlug,
-          attachment.fileName,
-          attachment.fileSize,
-          attachment.mimeType,
-          attachment.r2Key,
-          createdAt,
-        );
+        attachments,
       });
-
-      try {
-        // 単一トランザクション内で一括実行する。
-        await c.env.DB.batch([documentStatement, ...attachmentStatements]);
-        committedSlug = candidateSlug;
-        break;
-      } catch (error) {
-        lastError = error;
-        const errorMessage =
-          error instanceof Error ? error.message : String(error);
-
-        // 主キーの一意性制約違反時はリトライを実施する。
-        if (
-          errorMessage.includes('UNIQUE constraint failed') ||
-          errorMessage.includes('PRIMARY KEY')
-        ) {
-          console.warn(
-            `Slug衝突を検知しました(${candidateSlug})。再試行中(${attempt + 1}/${maxRetries})...`,
-          );
-          continue;
-        }
-
-        // その他のDBエラー時はリトライせず中断する。
-        console.error('D1データベース書き込みエラー:', error);
+    } catch (error) {
+      if (error instanceof SlugCollisionError) {
         return c.json(
           {
             error: {
-              message: 'データベースの書き込みに失敗しました。',
+              message: 'ドキュメント識別子の採番に失敗しました。',
             },
           },
           500,
         );
       }
-    }
 
-    if (!committedSlug) {
-      console.error('Slug生成とD1コミットのリトライ上限超過:', lastError);
+      console.error('D1データベース書き込みエラー:', error);
       return c.json(
         {
           error: {
-            message: 'ドキュメント識別子の採番に失敗しました。',
+            message: 'データベースの書き込みに失敗しました。',
           },
         },
         500,
@@ -422,13 +329,13 @@ documentsRouter.post(
     }
 
     const responsePayload: DocumentCommitResponse = {
-      id: committedSlug,
-      url: `/p/${committedSlug}`,
+      id: createResult.slug,
+      url: `/p/${createResult.slug}`,
       title,
-      editToken,
-      modifyToken,
-      expiresAt,
-      createdAt,
+      editToken: createResult.editToken,
+      modifyToken: createResult.modifyToken,
+      expiresAt: createResult.expiresAt,
+      createdAt: createResult.createdAt,
     };
 
     return c.json(responsePayload, 201);
