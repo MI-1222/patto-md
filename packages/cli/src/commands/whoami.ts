@@ -38,7 +38,9 @@ export async function runWhoami(
   const user = await fetchCurrentUser(token, apiUrl);
   if (user) {
     console.log('API認証状態: 有効(接続成功)。');
-    console.log(`ユーザー名: ${user.username} (${user.provider})`);
+    console.log(`ユーザー名: ${user.username}`);
+    console.log(`認証プロバイダ: ${user.provider}`);
+    console.log(`プロバイダユーザーID: ${user.providerUserId}`);
   } else {
     console.log('API認証状態: 照合失敗またはオフライン。');
   }

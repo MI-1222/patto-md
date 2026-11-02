@@ -133,7 +133,9 @@ describe('CLI コマンド実行テスト (commands/*.ts)', () => {
         expect.stringContaining('現在のトークン: pmd_pat_...9012'),
       );
       expect(logSpy).toHaveBeenCalledWith('API認証状態: 有効(接続成功)。');
-      expect(logSpy).toHaveBeenCalledWith('ユーザー名: testuser (github)');
+      expect(logSpy).toHaveBeenCalledWith('ユーザー名: testuser');
+      expect(logSpy).toHaveBeenCalledWith('認証プロバイダ: github');
+      expect(logSpy).toHaveBeenCalledWith('プロバイダユーザーID: 1');
     });
   });
 
