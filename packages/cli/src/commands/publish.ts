@@ -92,20 +92,21 @@ export async function runPublish(
   const passcode = options.passcode?.trim();
   let visibility: DocumentVisibility;
 
-  if (passcode && passcode.length > 0) {
-    if (options.visibility && options.visibility !== 'protected') {
-      console.error(
-        `--passcode 指定時は公開範囲(--visibility)を 'protected' に設定する必要があります。(指定値: ${options.visibility})`,
-      );
-      process.exitCode = 1;
-      return;
-    }
+  if (options.passcode !== undefined) {
     if (
+      !passcode ||
       passcode.length < MIN_PASSCODE_LENGTH ||
       passcode.length > MAX_PASSCODE_LENGTH
     ) {
       console.error(
-        `パスコードは${MIN_PASSCODE_LENGTH}文字以上${MAX_PASSCODE_LENGTH}文字以下で指定してください。`,
+        `パスコードは${MIN_PASSCODE_LENGTH}文字以上${MAX_PASSCODE_LENGTH}文字以下で指定してください。(指定文字数: ${passcode ? passcode.length : 0})`,
+      );
+      process.exitCode = 1;
+      return;
+    }
+    if (options.visibility && options.visibility !== 'protected') {
+      console.error(
+        `--passcode 指定時は公開範囲(--visibility)を 'protected' に設定する必要があります。(指定値: ${options.visibility})`,
       );
       process.exitCode = 1;
       return;
@@ -115,7 +116,7 @@ export async function runPublish(
     visibility = options.visibility || 'unlisted';
     if (visibility === 'protected') {
       console.error(
-        "公開範囲(--visibility)に 'protected' を指定する場合は、--passcode で暗証番号(4〜32文字)を指定する必要があります。",
+        `公開範囲(--visibility)に 'protected' を指定する場合は、--passcode で暗証番号(${MIN_PASSCODE_LENGTH}〜${MAX_PASSCODE_LENGTH}文字)を指定する必要があります。`,
       );
       process.exitCode = 1;
       return;

@@ -516,14 +516,44 @@ describe('CLI コマンド実行テスト (commands/*.ts)', () => {
       );
     });
 
-    it('--passcode の文字数が不足している場合にエラー終了すること。', async () => {
+    it('--passcode の文字数が不足している場合や超過している場合にエラー終了すること。', async () => {
       await writeConfigFile({ token: validToken }, tempConfigFile);
       await fs.writeFile(markdownFile, '# 不足\n\nテキスト。');
 
       const errSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
 
+      // 1. 3文字 (不足)
       await runPublish(markdownFile, {
-        passcode: '123', // 3文字 (最小4文字)
+        passcode: '123',
+      });
+
+      expect(process.exitCode).toBe(1);
+      expect(errSpy).toHaveBeenCalledWith(
+        expect.stringContaining(
+          'パスコードは4文字以上32文字以下で指定してください。',
+        ),
+      );
+
+      process.exitCode = undefined;
+
+      // 2. 33文字 (超過)
+      const overPasscode = 'p'.repeat(33);
+      await runPublish(markdownFile, {
+        passcode: overPasscode,
+      });
+
+      expect(process.exitCode).toBe(1);
+      expect(errSpy).toHaveBeenCalledWith(
+        expect.stringContaining(
+          'パスコードは4文字以上32文字以下で指定してください。',
+        ),
+      );
+
+      process.exitCode = undefined;
+
+      // 3. 空文字
+      await runPublish(markdownFile, {
+        passcode: '   ',
       });
 
       expect(process.exitCode).toBe(1);
