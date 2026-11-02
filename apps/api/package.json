@@ -22,8 +22,7 @@
     "@modelcontextprotocol/sdk": "^1.32.2",
     "@patto-md/shared": "workspace:*",
     "aws4fetch": "^1.0.20",
-    "hono": "^4.13.13",
-    "zod": "^4.6.7"
+    "hono": "^4.13.13"
   },
   "devDependencies": {
     "@cloudflare/workers-types": "^4.20250224.0",
