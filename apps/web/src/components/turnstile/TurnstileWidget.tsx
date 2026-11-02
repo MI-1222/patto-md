@@ -52,6 +52,9 @@ export const TurnstileWidget = forwardRef<
   const containerRef = useRef<HTMLDivElement>(null);
   const widgetIdRef = useRef<string | null>(null);
 
+  const callbacksRef = useRef({ onSuccess, onExpire, onError });
+  callbacksRef.current = { onSuccess, onExpire, onError };
+
   useImperativeHandle(ref, () => ({
     reset: () => {
       if (widgetIdRef.current && window.turnstile) {
@@ -99,12 +102,12 @@ export const TurnstileWidget = forwardRef<
           size,
           callback: (token: string) => {
             if (!isDisposed) {
-              onSuccess(token);
+              callbacksRef.current.onSuccess(token);
             }
           },
           'expired-callback': () => {
             if (!isDisposed) {
-              onExpire?.();
+              callbacksRef.current.onExpire?.();
               if (widgetIdRef.current && window.turnstile) {
                 try {
                   window.turnstile.reset(widgetIdRef.current);
@@ -117,7 +120,7 @@ export const TurnstileWidget = forwardRef<
           'error-callback': (err?: unknown) => {
             if (!isDisposed) {
               console.warn('Turnstile 検証エラー検知:', err);
-              onError?.(err);
+              callbacksRef.current.onError?.(err);
             }
           },
         });
@@ -159,7 +162,7 @@ export const TurnstileWidget = forwardRef<
         widgetIdRef.current = null;
       }
     };
-  }, [siteKey, onSuccess, onExpire, onError, theme, size]);
+  }, [siteKey, theme, size]);
 
   return (
     <div
