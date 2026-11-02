@@ -1,4 +1,6 @@
+import fsSync from 'node:fs';
 import fs from 'node:fs/promises';
+import os from 'node:os';
 import path from 'node:path';
 import { MAX_SINGLE_FILE_SIZE } from '@patto-md/shared';
 import type { LocalAssetItem } from '../types.ts';
@@ -80,14 +82,81 @@ export function cleanRelativePath(rawPath: string): string {
   }
 }
 
+/** OSのシステム領域および予約パスのプレフィックス一覧。 */
+const SYSTEM_RESERVED_PREFIXES = [
+  '/etc',
+  '/bin',
+  '/sbin',
+  '/dev',
+  '/proc',
+  '/sys',
+  '/private',
+  '/System',
+  '/Library',
+  '/usr',
+  'C:\\Windows',
+  'C:\\Program Files',
+  'C:\\Program Files (x86)',
+  'C:\\ProgramData',
+];
+
+/** 機密性の高いディレクトリ名一覧。パスセグメントに含まれている場合はアクセスを拒絶する。 */
+const SENSITIVE_DIRECTORY_NAMES = new Set([
+  '.ssh',
+  '.gnupg',
+  '.aws',
+  '.config',
+  '.env',
+  '.git',
+]);
+
 /**
- * パスが安全なスコープ内に収まっているかを検証する。
- * OSルートパスへのアクセス(`root` そのもの)の拒絶、許可された画像拡張子の確認、
- * カレントディレクトリおよびベースディレクトリから4階層以上離脱するパストラバーサルを防止する。
+ * ディレクトリ階層を上位へ遡り、Gitルート(`.git`)またはプロジェクトルート(`package.json`)を探索する。
+ *
+ * @param startDir - 探索開始ディレクトリ。
+ * @returns 検出されたプロジェクトルートの絶対パス。見つからない場合は `null`。
+ */
+export function findProjectRoot(startDir: string): string | null {
+  let current = path.resolve(startDir);
+  const root = path.parse(current).root;
+
+  while (current && current !== root) {
+    try {
+      const gitPath = path.join(current, '.git');
+      const pkgPath = path.join(current, 'package.json');
+      if (fsSync.existsSync(gitPath) || fsSync.existsSync(pkgPath)) {
+        return current;
+      }
+    } catch {
+      /* 権限エラー等はスキップして上位を探索 */
+    }
+
+    const parent = path.dirname(current);
+    if (parent === current) {
+      break;
+    }
+    current = parent;
+  }
+
+  return null;
+}
+
+/**
+ * パスがシステム領域や機密パスに触れておらず、安全なスコープ内に収まっているかを検証する。
+ *
+ * 検証基準:
+ * 1. OSルートそのものでないこと。
+ * 2. 許可された画像拡張子(MIME)であること。
+ * 3. OSのシステム予約パス(`/etc`, `/System`, `C:\Windows` 等)でないこと。
+ * 4. 機密ディレクトリセグメント(`.ssh`, `.gnupg`, `.aws` 等)を含まないこと。
+ * 5. スコープ境界:
+ *    - Gitルートまたはプロジェクトルートが存在する場合、その境界配下に収まっていること。
+ *    - プロジェクト外の場合は、基準ディレクトリ(`baseDir`)またはカレントディレクトリ(`cwd`)の配下、
+ *      もしくは過度な遡及(ホームディレクトリ外やシステムルート直下)を行っていないこと。
  *
  * @param resolvedPath - 解決された絶対パス。
  * @param baseDir - 基準ディレクトリ。
- * @returns 安全と判断される場合は `true`。
+ * @returns 安全と判断される場合は `true`、それ以外は `false`。
  */
 export function isSafePath(resolvedPath: string, baseDir: string): boolean {
   const root = path.parse(resolvedPath).root;
@@ -100,18 +169,54 @@ export function isSafePath(resolvedPath: string, baseDir: string): boolean {
     return false;
   }
 
+  const normalizedPath = path.normalize(resolvedPath);
+  for (const prefix of SYSTEM_RESERVED_PREFIXES) {
+    if (
+      normalizedPath === prefix ||
+      normalizedPath.startsWith(`${prefix}${path.sep}`) ||
+      normalizedPath
+        .toLowerCase()
+        .startsWith(`${prefix.toLowerCase()}${path.sep}`)
+    ) {
+      return false;
+    }
+  }
+
+  const segments = normalizedPath.split(path.sep);
+  for (const segment of segments) {
+    if (SENSITIVE_DIRECTORY_NAMES.has(segment)) {
+      return false;
+    }
+  }
+
   const cwd = process.cwd();
-  const relFromBase = path.relative(baseDir, resolvedPath);
-  const relFromCwd = path.relative(cwd, resolvedPath);
+  const projectRoot = findProjectRoot(baseDir) ?? findProjectRoot(cwd);
+
+  if (projectRoot) {
+    const relFromRoot = path.relative(projectRoot, normalizedPath);
+    if (!relFromRoot.startsWith('..') && !path.isAbsolute(relFromRoot)) {
+      return true;
+    }
+  }
+
+  const relFromBase = path.relative(baseDir, normalizedPath);
+  const relFromCwd = path.relative(cwd, normalizedPath);
 
   if (!relFromBase.startsWith('..') || !relFromCwd.startsWith('..')) {
     return true;
   }
 
-  if (
-    relFromBase.startsWith('../../../../') &&
-    relFromCwd.startsWith('../../../../')
-  ) {
+  const homedir = os.homedir();
+  if (homedir) {
+    const relFromHome = path.relative(homedir, normalizedPath);
+    if (relFromHome.startsWith('..') || path.isAbsolute(relFromHome)) {
+      return false;
+    }
+  }
+
+  const parentOfBase = path.dirname(baseDir);
+  const relFromParent = path.relative(parentOfBase, normalizedPath);
+  if (relFromParent.startsWith('..')) {
     return false;
   }
 

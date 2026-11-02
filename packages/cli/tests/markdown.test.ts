@@ -78,6 +78,40 @@ describe('Markdown 解析およびアセット抽出 (lib/markdown.ts)', () => {
       const target = path.join(baseDir, 'secret.env');
       expect(isSafePath(target, baseDir)).toBe(false);
     });
+
+    it('OSルートそのものを拒絶すること。', () => {
+      const root = path.parse(tempDir).root;
+      expect(isSafePath(root, tempDir)).toBe(false);
+    });
+
+    it('システム予約ディレクトリ配下のパスを拒絶すること。', () => {
+      const isWin = process.platform === 'win32';
+      const forbiddenPath = isWin
+        ? 'C:\\Windows\\System32\\logo.png'
+        : '/etc/logo.png';
+      expect(isSafePath(forbiddenPath, tempDir)).toBe(false);
+    });
+
+    it('機密ディレクトリ名(.ssh, .git, .env等)を含むパスを拒絶すること。', () => {
+      const target = path.join(tempDir, '.ssh', 'id_rsa.png');
+      expect(isSafePath(target, tempDir)).toBe(false);
+
+      const gitTarget = path.join(tempDir, '.git', 'hooks', 'leak.png');
+      expect(isSafePath(gitTarget, tempDir)).toBe(false);
+    });
+
+    it('Gitルートまたはプロジェクトルート配下の別階層の画像を安全と判定すること。', async () => {
+      // tempDir 直下に package.json を配置してプロジェクトルートと見立てる
+      await fs.writeFile(path.join(tempDir, 'package.json'), '{}');
+
+      const docsDir = path.join(tempDir, 'docs', 'deep');
+      const assetsDir = path.join(tempDir, 'assets', 'images');
+      await fs.mkdir(docsDir, { recursive: true });
+      await fs.mkdir(assetsDir, { recursive: true });
+
+      const imgPath = path.join(assetsDir, 'banner.webp');
+      expect(isSafePath(imgPath, docsDir)).toBe(true);
+    });
   });
 
   describe('extractAndResolveAssets', () => {
