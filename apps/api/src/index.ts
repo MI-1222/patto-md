@@ -7,6 +7,7 @@ import { uploadRouter } from './routes/upload';
 import { assetsRouter } from './routes/assets';
 import { authRouter } from './routes/auth';
 import { userTokensRouter } from './routes/user-tokens';
+import { mcpRouter } from './routes/mcp';
 import { resolveAllowedOrigin } from './lib/cors';
 import type { AppEnv } from './types';
 
@@ -101,5 +102,9 @@ app.route('/api/auth', authRouter);
 
 /** PAT管理関連APIサブルーターのマウント。 */
 app.route('/api/user/tokens', userTokensRouter);
+
+/** Model Context Protocol (MCP) エンドポイントのマウント。 */
+app.route('/api/mcp', mcpRouter);
+app.route('/mcp', mcpRouter);
 
 export default app;
