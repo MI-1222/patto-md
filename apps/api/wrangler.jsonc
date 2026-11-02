@@ -8,7 +8,9 @@
   "vars": {
     "DISCORD_CLIENT_ID": "1566018261005639740",
     "ENVIRONMENT": "production",
-    "FRONTEND_ORIGIN": "https://patto-md-web.mi-1222.workers.dev",
+    // `apps/api/src/lib/cors.ts`の正規表現判定により任意の`*.workers.dev`が自動許可される。
+    // `FRONTEND_ORIGIN`は、カスタムドメイン等を使用する場合に指定する。
+    "FRONTEND_ORIGIN": "",
     "GITHUB_CLIENT_ID": "Ov23lic6V2usSo1HogLR",
     "R2_BUCKET_NAME": "patto-md-r2"
   },
