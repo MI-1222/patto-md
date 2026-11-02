@@ -174,6 +174,25 @@ describe('Markdown 解析およびアセット抽出 (lib/markdown.ts)', () => {
       expect(asset?.originalPaths).toContain('./photo.png');
       expect(asset?.originalPaths).toContain('photo.png');
     });
+
+    it('多数の画像ファイル(10枚)を並列に読み込んで解決できること。', async () => {
+      const imgDir = path.join(tempDir, 'bulk');
+      await fs.mkdir(imgDir, { recursive: true });
+
+      const imageLines: string[] = [];
+      for (let i = 0; i < 10; i++) {
+        const filePath = path.join(imgDir, `image_${i}.png`);
+        await fs.writeFile(filePath, Buffer.from(`fake-image-${i}`));
+        imageLines.push(`![画像${i}](./bulk/image_${i}.png)`);
+      }
+
+      const mdContent = `# バルクテスト\n\n${imageLines.join('\n')}`;
+      const result = await extractAndResolveAssets(mdContent, markdownFile);
+
+      expect(result.missingPaths).toHaveLength(0);
+      expect(result.invalidPaths).toHaveLength(0);
+      expect(result.assets).toHaveLength(10);
+    });
   });
 
   describe('replaceMarkdownImageUrls', () => {

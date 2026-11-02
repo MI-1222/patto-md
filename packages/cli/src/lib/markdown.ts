@@ -2,7 +2,10 @@ import fsSync from 'node:fs';
 import fs from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
-import { MAX_SINGLE_FILE_SIZE } from '@patto-md/shared';
+import {
+  MAX_SINGLE_FILE_SIZE,
+  type AllowedImageMimeType,
+} from '@patto-md/shared';
 import type { LocalAssetItem } from '../types.ts';
 import { resolveImageMimeType } from './mime.ts';
 
@@ -269,7 +272,15 @@ export async function extractAndResolveAssets(
     }
   }
 
-  const assetMap = new Map<string, LocalAssetItem>();
+  const candidateMap = new Map<
+    string,
+    {
+      absolutePath: string;
+      originalPath: string;
+      originalPaths: string[];
+      mimeType: AllowedImageMimeType;
+    }
+  >();
   const missingPaths: string[] = [];
   const invalidPaths: Array<{ path: string; reason: string }> = [];
 
@@ -298,55 +309,80 @@ export async function extractAndResolveAssets(
       continue;
     }
 
-    const existing = assetMap.get(absolutePath);
+    const existing = candidateMap.get(absolutePath);
     if (existing) {
       if (!existing.originalPaths.includes(rawPath)) {
         existing.originalPaths.push(rawPath);
       }
-      continue;
-    }
-
-    try {
-      const stats = await fs.stat(absolutePath);
-      if (!stats.isFile()) {
-        missingPaths.push(rawPath);
-        continue;
-      }
-
-      if (stats.size > MAX_SINGLE_FILE_SIZE) {
-        invalidPaths.push({
-          path: rawPath,
-          reason: `単一ファイルサイズ制限(10MB)を超過しています: ${(stats.size / 1024 / 1024).toFixed(2)}MB`,
-        });
-        continue;
-      }
-
-      const buffer = await fs.readFile(absolutePath);
-      const fileName = path.basename(absolutePath);
-
-      assetMap.set(absolutePath, {
+    } else {
+      candidateMap.set(absolutePath, {
+        absolutePath,
         originalPath: rawPath,
         originalPaths: [rawPath],
-        absolutePath,
-        fileName,
-        size: stats.size,
         mimeType,
-        buffer,
       });
-    } catch (error) {
-      if ((error as NodeJS.ErrnoException).code === 'ENOENT') {
-        missingPaths.push(rawPath);
-      } else {
-        invalidPaths.push({
-          path: rawPath,
-          reason: `ファイル読み込みに失敗しました: ${(error as Error).message}`,
-        });
-      }
     }
   }
 
+  const fileReadPromises = Array.from(candidateMap.values()).map(
+    async (candidate) => {
+      try {
+        const stats = await fs.stat(candidate.absolutePath);
+        if (!stats.isFile()) {
+          for (const rawPath of candidate.originalPaths) {
+            missingPaths.push(rawPath);
+          }
+          return null;
+        }
+
+        if (stats.size > MAX_SINGLE_FILE_SIZE) {
+          for (const rawPath of candidate.originalPaths) {
+            invalidPaths.push({
+              path: rawPath,
+              reason: `単一ファイルサイズ制限(10MB)を超過しています: ${(stats.size / 1024 / 1024).toFixed(2)}MB`,
+            });
+          }
+          return null;
+        }
+
+        const buffer = await fs.readFile(candidate.absolutePath);
+        const fileName = path.basename(candidate.absolutePath);
+
+        const asset: LocalAssetItem = {
+          originalPath: candidate.originalPath,
+          originalPaths: candidate.originalPaths,
+          absolutePath: candidate.absolutePath,
+          fileName,
+          size: stats.size,
+          mimeType: candidate.mimeType,
+          buffer,
+        };
+        return asset;
+      } catch (error) {
+        if ((error as NodeJS.ErrnoException).code === 'ENOENT') {
+          for (const rawPath of candidate.originalPaths) {
+            missingPaths.push(rawPath);
+          }
+        } else {
+          for (const rawPath of candidate.originalPaths) {
+            invalidPaths.push({
+              path: rawPath,
+              reason: `ファイル読み込みに失敗しました: ${(error as Error).message}`,
+            });
+          }
+        }
+        return null;
+      }
+    },
+  );
+
+  const readResults = await Promise.all(fileReadPromises);
+  const assets: LocalAssetItem[] = readResults.filter(
+    (asset): asset is LocalAssetItem => asset !== null,
+  );
+
   return {
-    assets: Array.from(assetMap.values()),
+    assets,
     missingPaths,
     invalidPaths,
   };
