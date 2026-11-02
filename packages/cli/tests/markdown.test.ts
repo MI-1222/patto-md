@@ -112,6 +112,13 @@ describe('Markdown 解析およびアセット抽出 (lib/markdown.ts)', () => {
       const imgPath = path.join(assetsDir, 'banner.webp');
       expect(isSafePath(imgPath, docsDir)).toBe(true);
     });
+
+    it('異なるドライブレター間のアクセスを拒絶すること(Windows環境想定)。', () => {
+      // 基準が C: ドライブで、対象が D: ドライブの場合
+      const baseDir = 'C:\\Users\\User\\project';
+      const target = 'D:\\secret\\photo.png';
+      expect(isSafePath(target, baseDir)).toBe(false);
+    });
   });
 
   describe('extractAndResolveAssets', () => {

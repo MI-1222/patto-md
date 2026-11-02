@@ -161,9 +161,18 @@ export function findProjectRoot(startDir: string): string | null {
  * @param baseDir - 基準ディレクトリ。
  * @returns 安全と判断される場合は `true`、それ以外は `false`。
  */
+/** ドライブレター(例: C:, D:)を検出する正規表現。 */
+const DRIVE_LETTER_REGEX = /^[a-zA-Z]:/;
+
 export function isSafePath(resolvedPath: string, baseDir: string): boolean {
   const root = path.parse(resolvedPath).root;
   if (resolvedPath === root) {
+    return false;
+  }
+
+  const targetDrive = DRIVE_LETTER_REGEX.exec(resolvedPath)?.[0]?.toUpperCase();
+  const baseDrive = DRIVE_LETTER_REGEX.exec(baseDir)?.[0]?.toUpperCase();
+  if (targetDrive && baseDrive && targetDrive !== baseDrive) {
     return false;
   }
 
@@ -194,32 +203,41 @@ export function isSafePath(resolvedPath: string, baseDir: string): boolean {
 
   const cwd = process.cwd();
   const projectRoot = findProjectRoot(baseDir) ?? findProjectRoot(cwd);
+  const pathModule =
+    targetDrive || baseDrive || process.platform === 'win32'
+      ? path.win32
+      : path;
 
   if (projectRoot) {
-    const relFromRoot = path.relative(projectRoot, normalizedPath);
-    if (!relFromRoot.startsWith('..') && !path.isAbsolute(relFromRoot)) {
+    const relFromRoot = pathModule.relative(projectRoot, normalizedPath);
+    if (!relFromRoot.startsWith('..') && !pathModule.isAbsolute(relFromRoot)) {
       return true;
     }
   }
 
-  const relFromBase = path.relative(baseDir, normalizedPath);
-  const relFromCwd = path.relative(cwd, normalizedPath);
+  const relFromBase = pathModule.relative(baseDir, normalizedPath);
+  const relFromCwd = pathModule.relative(cwd, normalizedPath);
 
-  if (!relFromBase.startsWith('..') || !relFromCwd.startsWith('..')) {
+  const isInsideBase =
+    !relFromBase.startsWith('..') && !pathModule.isAbsolute(relFromBase);
+  const isInsideCwd =
+    !relFromCwd.startsWith('..') && !pathModule.isAbsolute(relFromCwd);
+
+  if (isInsideBase || isInsideCwd) {
     return true;
   }
 
   const homedir = os.homedir();
   if (homedir) {
-    const relFromHome = path.relative(homedir, normalizedPath);
-    if (relFromHome.startsWith('..') || path.isAbsolute(relFromHome)) {
+    const relFromHome = pathModule.relative(homedir, normalizedPath);
+    if (relFromHome.startsWith('..') || pathModule.isAbsolute(relFromHome)) {
       return false;
     }
   }
 
   const parentOfBase = path.dirname(baseDir);
-  const relFromParent = path.relative(parentOfBase, normalizedPath);
-  if (relFromParent.startsWith('..')) {
+  const relFromParent = pathModule.relative(parentOfBase, normalizedPath);
+  if (relFromParent.startsWith('..') || pathModule.isAbsolute(relFromParent)) {
     return false;
   }
 
