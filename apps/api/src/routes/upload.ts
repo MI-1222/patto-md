@@ -8,11 +8,8 @@ import {
 } from '@patto-md/shared';
 import { Hono, type MiddlewareHandler } from 'hono';
 import { extractBearerToken } from '../lib/auth.ts';
-import {
-  isPat,
-  safelyGetExecutionCtx,
-  verifyAndResolvePat,
-} from '../lib/pat.ts';
+import { isPat } from '../lib/pat.ts';
+import { resolvePatAuth } from '../middlewares/pat-auth.ts';
 import { createPresignedPutUrl, generateR2Key } from '../lib/r2.ts';
 import { createRateLimitMiddleware } from '../middlewares/rate-limit.ts';
 import { createTurnstileMiddleware } from '../middlewares/turnstile.ts';
@@ -47,11 +44,7 @@ const uploadAuthOrTurnstileMiddleware: MiddlewareHandler<AppEnv> = async (
       );
     }
 
-    const patUser = await verifyAndResolvePat({
-      db: c.env.DB,
-      token,
-      executionCtx: safelyGetExecutionCtx(c),
-    });
+    const patUser = await resolvePatAuth(c);
 
     if (!patUser) {
       return c.json(

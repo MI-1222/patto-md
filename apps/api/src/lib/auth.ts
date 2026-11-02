@@ -7,7 +7,8 @@ import {
   verifyTokenHash,
   type CapabilityTokenType,
 } from '@patto-md/shared';
-import { isPat, safelyGetExecutionCtx, verifyAndResolvePat } from './pat.ts';
+import { isPat } from './pat.ts';
+import { resolvePatAuth } from '../middlewares/pat-auth.ts';
 import { resolveSessionUser } from '../middlewares/session.ts';
 import type { AppEnv, AuthenticatedDocument } from '../types.ts';
 
@@ -148,11 +149,7 @@ export function createDocumentAuthMiddleware(
 
     if (token) {
       if (isPatToken) {
-        const patUser = await verifyAndResolvePat({
-          db: c.env.DB,
-          token,
-          executionCtx: safelyGetExecutionCtx(c),
-        });
+        const patUser = await resolvePatAuth(c);
 
         if (!patUser) {
           return c.json(

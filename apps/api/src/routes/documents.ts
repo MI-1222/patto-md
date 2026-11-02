@@ -45,12 +45,8 @@ import { extractBearerToken } from '../lib/auth.ts';
 import { calculateDocumentCacheControl } from '../lib/cache.ts';
 import { calculateExpiresAt } from '../lib/date.ts';
 import { hashPasscode, verifyPasscode } from '../lib/passcode.ts';
-import {
-  isPat,
-  parseUserId,
-  safelyGetExecutionCtx,
-  verifyAndResolvePat,
-} from '../lib/pat.ts';
+import { isPat, parseUserId } from '../lib/pat.ts';
+import { resolvePatAuth } from '../middlewares/pat-auth.ts';
 import {
   checkR2ObjectExists,
   copyAndDeleteR2Object,
@@ -276,11 +272,7 @@ documentsRouter.post(
     const bearer = extractBearerToken(authHeader);
 
     if (bearer && isPat(bearer)) {
-      const patUser = await verifyAndResolvePat({
-        db: c.env.DB,
-        token: bearer,
-        executionCtx: safelyGetExecutionCtx(c),
-      });
+      const patUser = await resolvePatAuth(c);
 
       if (!patUser) {
         return c.json(
@@ -490,11 +482,7 @@ documentsRouter.get('/', async (c) => {
       const authHeader = c.req.header('Authorization');
       const bearer = extractBearerToken(authHeader);
       if (bearer && isPat(bearer)) {
-        const patUser = await verifyAndResolvePat({
-          db: c.env.DB,
-          token: bearer,
-          executionCtx: safelyGetExecutionCtx(c),
-        });
+        const patUser = await resolvePatAuth(c);
 
         if (!patUser) {
           c.header('Cache-Control', 'no-store');
@@ -778,11 +766,7 @@ documentsRouter.get('/:id', async (c) => {
     }
 
     if (!isAuthorized && bearerToken && isPat(bearerToken)) {
-      const patUser = await verifyAndResolvePat({
-        db: c.env.DB,
-        token: bearerToken,
-        executionCtx: safelyGetExecutionCtx(c),
-      });
+      const patUser = await resolvePatAuth(c);
       if (
         patUser &&
         patUser.scopes.includes('documents:read') &&
