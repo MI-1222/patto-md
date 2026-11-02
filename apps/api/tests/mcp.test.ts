@@ -670,6 +670,42 @@ describe('MCP publish_document ツール', () => {
       true,
     );
   });
+
+  test('`visibility: protected` 指定時にパスコードが未指定の場合はエラーになること。', async () => {
+    const res = await app.request('/api/mcp', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${TEST_VALID_PAT_ALL}`,
+      },
+      body: JSON.stringify({
+        jsonrpc: '2.0',
+        id: 13,
+        method: 'tools/call',
+        params: {
+          name: 'publish_document',
+          arguments: {
+            title: 'パスコード未指定保護テスト',
+            content: '保護本文',
+            visibility: 'protected',
+          },
+        },
+      }),
+    });
+
+    assert.strictEqual(res.status, 200);
+    const json = (await res.json()) as {
+      result: {
+        content: Array<{ type: string; text: string }>;
+        isError?: boolean;
+      };
+    };
+    assert.strictEqual(json.result.isError, true);
+    assert.strictEqual(
+      json.result.content[0].text.includes('パスコード'),
+      true,
+    );
+  });
 });
 
 describe('MCP get_document ツール', () => {
@@ -1140,6 +1176,42 @@ describe('MCP update_document ツール', () => {
     assert.strictEqual(json.result.isError, true);
     assert.strictEqual(
       json.result.content[0].text.includes('所有者が一致しません'),
+      true,
+    );
+  });
+
+  test('`visibility: protected` への変更時にパスコードが未指定の場合はエラーになること。', async () => {
+    const res = await app.request('/api/mcp', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${TEST_VALID_PAT_ALL}`,
+      },
+      body: JSON.stringify({
+        jsonrpc: '2.0',
+        id: 32,
+        method: 'tools/call',
+        params: {
+          name: 'update_document',
+          arguments: {
+            id: TARGET_DOC_ID,
+            content: '# 更新本文',
+            visibility: 'protected',
+          },
+        },
+      }),
+    });
+
+    assert.strictEqual(res.status, 200);
+    const json = (await res.json()) as {
+      result: {
+        content: Array<{ type: string; text: string }>;
+        isError?: boolean;
+      };
+    };
+    assert.strictEqual(json.result.isError, true);
+    assert.strictEqual(
+      json.result.content[0].text.includes('パスコード'),
       true,
     );
   });

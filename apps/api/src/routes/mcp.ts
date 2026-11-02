@@ -13,7 +13,9 @@
 import {
   MAX_SINGLE_FILE_SIZE,
   mcpGetDocumentSchema,
+  mcpPublishDocumentBaseSchema,
   mcpPublishDocumentSchema,
+  mcpUpdateDocumentBaseSchema,
   mcpUpdateDocumentSchema,
 } from '@patto-md/shared';
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
@@ -111,7 +113,7 @@ mcpRouter.post('/', async (c) => {
     {
       description:
         'Markdownドキュメントおよび添付画像を patto-md へ新規公開し、閲覧用パーマリンクURLを発行します。',
-      inputSchema: mcpPublishDocumentSchema.shape,
+      inputSchema: mcpPublishDocumentBaseSchema.shape,
     },
     async (params) => {
       if (!patUser.scopes.includes('documents:write')) {
@@ -126,6 +128,21 @@ mcpRouter.post('/', async (c) => {
         };
       }
 
+      const parseResult = mcpPublishDocumentSchema.safeParse(params);
+      if (!parseResult.success) {
+        return {
+          isError: true,
+          content: [
+            {
+              type: 'text',
+              text:
+                parseResult.error.issues[0]?.message ??
+                '入力パラメータの検証に失敗しました。',
+            },
+          ],
+        };
+      }
+
       const {
         title,
         content,
@@ -134,7 +151,7 @@ mcpRouter.post('/', async (c) => {
         visibility,
         passcode,
         images = [],
-      } = params;
+      } = parseResult.data;
 
       const expectedPrefix = getExpirationPrefix(expiration);
       const docUuid = crypto.randomUUID();
@@ -324,7 +341,7 @@ mcpRouter.post('/', async (c) => {
     {
       description:
         '既存のドキュメントの Markdown 本文やタイトル、メタデータを更新します。自身の PAT で作成したドキュメントのみ更新可能です。',
-      inputSchema: mcpUpdateDocumentSchema.shape,
+      inputSchema: mcpUpdateDocumentBaseSchema.shape,
     },
     async (params) => {
       if (!patUser.scopes.includes('documents:write')) {
@@ -339,6 +356,21 @@ mcpRouter.post('/', async (c) => {
         };
       }
 
+      const parseResult = mcpUpdateDocumentSchema.safeParse(params);
+      if (!parseResult.success) {
+        return {
+          isError: true,
+          content: [
+            {
+              type: 'text',
+              text:
+                parseResult.error.issues[0]?.message ??
+                '入力パラメータの検証に失敗しました。',
+            },
+          ],
+        };
+      }
+
       const {
         id,
         content,
@@ -347,7 +379,7 @@ mcpRouter.post('/', async (c) => {
         visibility,
         passcode,
         images = [],
-      } = params;
+      } = parseResult.data;
 
       const doc = await c.env.DB.prepare('SELECT * FROM documents WHERE id = ?')
         .bind(id)
@@ -512,6 +544,18 @@ mcpRouter.post('/', async (c) => {
         nextPasscodeHash = await hashPasscode(passcode);
       } else if (visibility && visibility !== 'protected') {
         nextPasscodeHash = null;
+      }
+
+      if (nextVisibility === 'protected' && !nextPasscodeHash) {
+        return {
+          isError: true,
+          content: [
+            {
+              type: 'text',
+              text: '公開範囲を protected に設定する場合は、パスコードの指定が必須です。',
+            },
+          ],
+        };
       }
 
       const updatedAt = new Date().toISOString();

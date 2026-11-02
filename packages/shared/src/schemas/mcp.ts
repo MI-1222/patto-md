@@ -2,9 +2,11 @@ import { z } from 'zod';
 import {
   ALLOWED_IMAGE_MIME_TYPES,
   EXPIRATION_PRESETS,
+  MAX_PASSCODE_LENGTH,
   MAX_SINGLE_FILE_SIZE,
   MAX_TITLE_LENGTH,
   MAX_TOTAL_FILE_SIZE,
+  MIN_PASSCODE_LENGTH,
   MIN_TITLE_LENGTH,
   SLUG_PATTERN,
 } from '../constants/limits.ts';
@@ -50,8 +52,8 @@ export const mcpImageItemSchema = z.object({
 /** MCP 添付画像アイテムの型。 */
 export type McpImageItem = z.infer<typeof mcpImageItemSchema>;
 
-/** ドキュメント公開ツール(`publish_document`)の入力バリデーションスキーマ。 */
-export const mcpPublishDocumentSchema = z.object({
+/** ドキュメント公開ツール(`publish_document`)の入力オブジェクトスキーマ。 */
+export const mcpPublishDocumentBaseSchema = z.object({
   /** ドキュメントのタイトル。 */
   title: z
     .string()
@@ -88,14 +90,20 @@ export const mcpPublishDocumentSchema = z.object({
     .default('unlisted')
     .describe('公開範囲(public, unlisted, protected。既定値: unlisted)'),
 
-  /** パスコード保護時の暗証番号(任意、4〜32文字)。 */
+  /** パスコード保護時の暗証番号(4〜32文字)。 */
   passcode: z
     .string()
-    .min(4, 'パスコードは4文字以上で指定してください。')
-    .max(32, 'パスコードは32文字以内で指定してください。')
+    .min(
+      MIN_PASSCODE_LENGTH,
+      `パスコードは${MIN_PASSCODE_LENGTH}文字以上で指定してください。`,
+    )
+    .max(
+      MAX_PASSCODE_LENGTH,
+      `パスコードは${MAX_PASSCODE_LENGTH}文字以内で指定してください。`,
+    )
     .optional()
     .describe(
-      'パスコード保護時の暗証番号(visibilityがprotectedの場合に有効、4〜32文字)',
+      `パスコード保護時の暗証番号(visibilityがprotectedの場合は必須、${MIN_PASSCODE_LENGTH}〜${MAX_PASSCODE_LENGTH}文字)`,
     ),
 
   /**
@@ -121,11 +129,33 @@ export const mcpPublishDocumentSchema = z.object({
     .describe('添付画像リスト(最大10件、単一最大10MB、合計最大30MB)'),
 });
 
+/**
+ * ドキュメント公開ツールの完成バリデーションスキーマ。
+ *
+ * visibility が protected の場合は、暗証番号(passcode)の入力を必須とする。
+ */
+export const mcpPublishDocumentSchema = mcpPublishDocumentBaseSchema.refine(
+  (data) => {
+    if (data.visibility === 'protected') {
+      return (
+        typeof data.passcode === 'string' &&
+        data.passcode.trim().length >= MIN_PASSCODE_LENGTH &&
+        data.passcode.trim().length <= MAX_PASSCODE_LENGTH
+      );
+    }
+    return true;
+  },
+  {
+    message: `公開範囲に protected を指定する場合は、${MIN_PASSCODE_LENGTH}〜${MAX_PASSCODE_LENGTH}文字のパスコード(passcode)の指定が必須です。`,
+    path: ['passcode'],
+  },
+);
+
 /** ドキュメント公開ツールの入力型。 */
 export type McpPublishDocumentInput = z.infer<typeof mcpPublishDocumentSchema>;
 
-/** ドキュメント更新ツール(`update_document`)の入力バリデーションスキーマ。 */
-export const mcpUpdateDocumentSchema = z.object({
+/** ドキュメント更新ツール(`update_document`)の入力オブジェクトスキーマ。 */
+export const mcpUpdateDocumentBaseSchema = z.object({
   /** 対象ドキュメントの Slug(12文字)。 */
   id: z
     .string()
@@ -164,8 +194,14 @@ export const mcpUpdateDocumentSchema = z.object({
   /** 更新後のパスコード(任意)。 */
   passcode: z
     .string()
-    .min(4, 'パスコードは4文字以上で指定してください。')
-    .max(32, 'パスコードは32文字以内で指定してください。')
+    .min(
+      MIN_PASSCODE_LENGTH,
+      `パスコードは${MIN_PASSCODE_LENGTH}文字以上で指定してください。`,
+    )
+    .max(
+      MAX_PASSCODE_LENGTH,
+      `パスコードは${MAX_PASSCODE_LENGTH}文字以内で指定してください。`,
+    )
     .optional()
     .describe('更新後のパスコード(任意)'),
 
@@ -191,6 +227,23 @@ export const mcpUpdateDocumentSchema = z.object({
     .optional()
     .describe('新規追加する添付画像リスト(任意)'),
 });
+
+/** ドキュメント更新ツールの完成バリデーションスキーマ。 */
+export const mcpUpdateDocumentSchema = mcpUpdateDocumentBaseSchema.refine(
+  (data) => {
+    if (data.passcode !== undefined && data.passcode.trim().length > 0) {
+      return (
+        data.passcode.trim().length >= MIN_PASSCODE_LENGTH &&
+        data.passcode.trim().length <= MAX_PASSCODE_LENGTH
+      );
+    }
+    return true;
+  },
+  {
+    message: `パスコードは${MIN_PASSCODE_LENGTH}〜${MAX_PASSCODE_LENGTH}文字で指定してください。`,
+    path: ['passcode'],
+  },
+);
 
 /** ドキュメント更新ツールの入力型。 */
 export type McpUpdateDocumentInput = z.infer<typeof mcpUpdateDocumentSchema>;

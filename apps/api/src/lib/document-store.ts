@@ -4,6 +4,8 @@ import {
   type OwnerProvider,
   generateCapabilityToken,
   hashToken,
+  MAX_PASSCODE_LENGTH,
+  MIN_PASSCODE_LENGTH,
 } from '@patto-md/shared';
 import { calculateExpiresAt } from './date.ts';
 import { hashPasscode } from './passcode.ts';
@@ -80,6 +82,8 @@ export const MAX_SLUG_COLLISION_RETRIES = 3;
  * Slug の衝突検知とリトライ、ケイパビリティトークンの生成・ハッシュ化、
  * パスコードのハッシュ化、有効期限の算出をアトミックに実行する。
  *
+ * 保護ドキュメント時、パスコード指定を必須としており、永久ロックを防御している。
+ *
  * @param db D1データベースインスタンス。
  * @param input ドキュメント永続化に必要な入力パラメータ。
  * @returns 永続化されたドキュメントのメタデータおよび平文トークン。
@@ -101,6 +105,18 @@ export async function createDocument(
     attachments = [],
     createdAt: inputCreatedAt,
   } = input;
+
+  if (visibility === 'protected') {
+    if (
+      !passcode ||
+      passcode.trim().length < MIN_PASSCODE_LENGTH ||
+      passcode.trim().length > MAX_PASSCODE_LENGTH
+    ) {
+      throw new Error(
+        `公開範囲に protected を指定する場合は、${MIN_PASSCODE_LENGTH}〜${MAX_PASSCODE_LENGTH}文字のパスコードの指定が必須です。`,
+      );
+    }
+  }
 
   const createdAt = inputCreatedAt ?? new Date().toISOString();
   const updatedAt = createdAt;

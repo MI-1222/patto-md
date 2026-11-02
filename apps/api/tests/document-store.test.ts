@@ -213,4 +213,41 @@ describe('ドキュメント永続化処理 (`document-store.ts`)', () => {
 
     assert.equal(attempts, 1);
   });
+
+  test('防御的ガード: protected 指定時にパスコード未指定の場合は例外をスローすること。', async () => {
+    const mockDb = {
+      prepare: () => ({ bind: () => ({}) }),
+      batch: async () => [],
+    } as unknown as D1Database;
+
+    const input: CreateDocumentInput = {
+      title: '保護パスコード欠落テスト',
+      contentR2Key: '7days/uploads/doc-6/content.md',
+      expiration: '7days',
+      visibility: 'protected',
+    };
+
+    await assert.rejects(async () => {
+      await createDocument(mockDb, input);
+    }, /公開範囲に protected を指定する場合は、4〜32文字のパスコードの指定が必須です。/);
+  });
+
+  test('防御的ガード: protected 指定時にパスコードが短すぎる場合は例外をスローすること。', async () => {
+    const mockDb = {
+      prepare: () => ({ bind: () => ({}) }),
+      batch: async () => [],
+    } as unknown as D1Database;
+
+    const input: CreateDocumentInput = {
+      title: '短いパスコードテスト',
+      contentR2Key: '7days/uploads/doc-7/content.md',
+      expiration: '7days',
+      visibility: 'protected',
+      passcode: '123',
+    };
+
+    await assert.rejects(async () => {
+      await createDocument(mockDb, input);
+    }, /公開範囲に protected を指定する場合は、4〜32文字のパスコードの指定が必須です。/);
+  });
 });
