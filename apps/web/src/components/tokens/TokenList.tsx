@@ -77,7 +77,7 @@ function getExpirationStatus(expiresAt: string | null): {
   }
 
   const diffMs = expireTime - now;
-  const diffMinutes = Math.floor(diffMs / (1000 * 60));
+  const diffMinutes = Math.ceil(diffMs / (1000 * 60));
   const diffHours = Math.floor(diffMs / (1000 * 60 * 60));
   const diffDays = Math.ceil(diffMs / (1000 * 60 * 60 * 24));
 
