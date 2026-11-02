@@ -154,7 +154,16 @@ mcpRouter.post('/', async (c) => {
         r2Key: string;
       }> = [];
 
-      try {
+      if (images.length > 0) {
+        const preparedImages: Array<{
+          originalPath: string;
+          fileId: string;
+          fileName: string;
+          mimeType: string;
+          r2Key: string;
+          buffer: Uint8Array;
+        }> = [];
+
         for (const img of images) {
           const buffer = decodeBase64Image(img.base64Data);
           if (buffer.byteLength > MAX_SINGLE_FILE_SIZE) {
@@ -173,34 +182,50 @@ mcpRouter.post('/', async (c) => {
           const fileName = sanitizeMcpFileName(img.path);
           const r2Key = `${expectedPrefix}uploads/${fileId}/${fileName}`;
 
-          await c.env.BUCKET.put(r2Key, buffer, {
-            httpMetadata: { contentType: img.mimeType },
-          });
-
-          pathMappings.push({
+          preparedImages.push({
             originalPath: img.path,
-            r2Key,
-          });
-
-          attachmentRecords.push({
-            id: fileId,
+            fileId,
             fileName,
-            fileSize: buffer.byteLength,
             mimeType: img.mimeType,
             r2Key,
+            buffer,
           });
         }
-      } catch (error) {
-        console.error('MCP 画像アップロードエラー:', error);
-        return {
-          isError: true,
-          content: [
-            {
-              type: 'text',
-              text: '画像の保存処理中にエラーが発生しました。',
-            },
-          ],
-        };
+
+        try {
+          await Promise.all(
+            preparedImages.map((img) =>
+              c.env.BUCKET.put(img.r2Key, img.buffer, {
+                httpMetadata: { contentType: img.mimeType },
+              }),
+            ),
+          );
+
+          for (const img of preparedImages) {
+            pathMappings.push({
+              originalPath: img.originalPath,
+              r2Key: img.r2Key,
+            });
+            attachmentRecords.push({
+              id: img.fileId,
+              fileName: img.fileName,
+              fileSize: img.buffer.byteLength,
+              mimeType: img.mimeType,
+              r2Key: img.r2Key,
+            });
+          }
+        } catch (error) {
+          console.error('MCP 画像アップロードエラー:', error);
+          return {
+            isError: true,
+            content: [
+              {
+                type: 'text',
+                text: '画像の保存処理中にエラーが発生しました。',
+              },
+            ],
+          };
+        }
       }
 
       const finalMarkdown = replaceMarkdownAssetPaths(content, pathMappings);
@@ -460,36 +485,63 @@ mcpRouter.post('/', async (c) => {
       }> = [];
 
       if (images.length > 0) {
+        const preparedImages: Array<{
+          originalPath: string;
+          fileId: string;
+          fileName: string;
+          mimeType: string;
+          r2Key: string;
+          buffer: Uint8Array;
+        }> = [];
+
+        for (const img of images) {
+          const buffer = decodeBase64Image(img.base64Data);
+          if (buffer.byteLength > MAX_SINGLE_FILE_SIZE) {
+            return {
+              isError: true,
+              content: [
+                {
+                  type: 'text',
+                  text: `画像「${img.path}」のサイズが上限を超過しています。`,
+                },
+              ],
+            };
+          }
+
+          const fileId = crypto.randomUUID();
+          const fileName = sanitizeMcpFileName(img.path);
+          const r2Key = `${expectedPrefix}uploads/${fileId}/${fileName}`;
+
+          preparedImages.push({
+            originalPath: img.path,
+            fileId,
+            fileName,
+            mimeType: img.mimeType,
+            r2Key,
+            buffer,
+          });
+        }
+
         try {
-          for (const img of images) {
-            const buffer = decodeBase64Image(img.base64Data);
-            if (buffer.byteLength > MAX_SINGLE_FILE_SIZE) {
-              return {
-                isError: true,
-                content: [
-                  {
-                    type: 'text',
-                    text: `画像「${img.path}」のサイズが上限を超過しています。`,
-                  },
-                ],
-              };
-            }
+          await Promise.all(
+            preparedImages.map((img) =>
+              c.env.BUCKET.put(img.r2Key, img.buffer, {
+                httpMetadata: { contentType: img.mimeType },
+              }),
+            ),
+          );
 
-            const fileId = crypto.randomUUID();
-            const fileName = sanitizeMcpFileName(img.path);
-            const r2Key = `${expectedPrefix}uploads/${fileId}/${fileName}`;
-
-            await c.env.BUCKET.put(r2Key, buffer, {
-              httpMetadata: { contentType: img.mimeType },
+          for (const img of preparedImages) {
+            pathMappings.push({
+              originalPath: img.originalPath,
+              r2Key: img.r2Key,
             });
-
-            pathMappings.push({ originalPath: img.path, r2Key });
             newAttachments.push({
-              id: fileId,
-              fileName,
-              fileSize: buffer.byteLength,
+              id: img.fileId,
+              fileName: img.fileName,
+              fileSize: img.buffer.byteLength,
               mimeType: img.mimeType,
-              r2Key,
+              r2Key: img.r2Key,
             });
           }
         } catch (error) {
