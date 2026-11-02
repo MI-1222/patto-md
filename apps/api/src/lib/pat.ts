@@ -198,6 +198,8 @@ export async function verifyAndResolvePat(params: {
 
     if (executionCtx && typeof executionCtx.waitUntil === 'function') {
       executionCtx.waitUntil(updatePromise);
+    } else {
+      await updatePromise;
     }
   }
 
