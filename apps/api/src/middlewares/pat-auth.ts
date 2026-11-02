@@ -9,6 +9,7 @@ import {
   safelyGetExecutionCtx,
   verifyAndResolvePat,
 } from '../lib/pat.ts';
+import { createTurnstileMiddleware } from './turnstile.ts';
 import type { AppEnv, PatAuthContext } from '../types.ts';
 
 /**
@@ -159,4 +160,65 @@ export function requirePatScope(
   requiredScope: TokenScope,
 ): MiddlewareHandler<AppEnv> {
   return createPatAuthMiddleware({ required: true, scope: requiredScope });
+}
+
+/**
+ * PAT による認可または Turnstile によるボット検証を行うミドルウェアを生成する。
+ *
+ * リクエストヘッダー `Authorization` に正当な PAT(要求スコープ保有)が指定されている場合は、
+ * CLI 等の外部連携クライアントと判定して Turnstile ボット検証をバイパスする。
+ * トークン未指定時は、Web ブラウザからのアクセスとして Turnstile ボット検証を実行する。
+ *
+ * @param requiredScope - PAT 指定時に要求されるスコープ名(既定値: `documents:write`)。
+ * @returns Hono ミドルウェアハンドラー。
+ */
+export function createOptionalPatOrTurnstileMiddleware(
+  requiredScope: TokenScope = 'documents:write',
+): MiddlewareHandler<AppEnv> {
+  const turnstileMiddleware = createTurnstileMiddleware<AppEnv>();
+
+  return async (c, next) => {
+    const authHeader = c.req.header('Authorization');
+    const token = extractBearerToken(authHeader);
+
+    if (token) {
+      if (!isPat(token)) {
+        return c.json(
+          {
+            error: {
+              message: '無効な認証トークン形式です。',
+            },
+          },
+          401,
+        );
+      }
+
+      const patUser = await resolvePatAuth(c);
+      if (!patUser) {
+        return c.json(
+          {
+            error: {
+              message: '無効または有効期限切れのPATトークンです。',
+            },
+          },
+          401,
+        );
+      }
+
+      if (!patUser.scopes.includes(requiredScope)) {
+        return c.json(
+          {
+            error: {
+              message: `操作に必要な権限(スコープ: ${requiredScope})がありません。`,
+            },
+          },
+          403,
+        );
+      }
+
+      return next();
+    }
+
+    return turnstileMiddleware(c, next);
+  };
 }

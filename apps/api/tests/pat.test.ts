@@ -29,7 +29,10 @@ import {
   verifyPat,
 } from '../src/lib/pat.ts';
 import { createSessionToken } from '../src/lib/session.ts';
-import { requirePatScope } from '../src/middlewares/pat-auth.ts';
+import {
+  createOptionalPatOrTurnstileMiddleware,
+  requirePatScope,
+} from '../src/middlewares/pat-auth.ts';
 import { documentsRouter } from '../src/routes/documents.ts';
 import { uploadRouter } from '../src/routes/upload.ts';
 import { userTokensRouter } from '../src/routes/user-tokens.ts';
@@ -866,6 +869,38 @@ describe('PAT認可ミドルウェア (`createPatAuthMiddleware` / `requirePatSc
       body.error.message,
       '無効または有効期限切れのPATトークンです。',
     );
+  });
+
+  test('`createOptionalPatOrTurnstileMiddleware` でトークン未指定時は Turnstile が実行されること。', async () => {
+    const app = new Hono<AppEnv>();
+    app.use('*', async (c, next) => {
+      c.env = {
+        ...c.env,
+        TURNSTILE_SECRET_KEY: '1x0000000000000000000000000000000AA',
+      };
+      await next();
+    });
+
+    app.post(
+      '/test-upload',
+      createOptionalPatOrTurnstileMiddleware('documents:write'),
+      (c) => c.json({ ok: true }),
+    );
+
+    // Turnstile ヘッダーなし時は 400 を返却。
+    const resNoHeader = await app.request('/test-upload', {
+      method: 'POST',
+    });
+    assert.strictEqual(resNoHeader.status, 400);
+
+    // テスト用 Always Pass トークン指定時は 200 で通過。
+    const resValidTurnstile = await app.request('/test-upload', {
+      method: 'POST',
+      headers: {
+        'cf-turnstile-response': 'dummy-turnstile-token',
+      },
+    });
+    assert.strictEqual(resValidTurnstile.status, 200);
   });
 
   test('last_used_at が未設定または5分以上前の場合に更新され、5分以内のアクセスでは更新がスキップされること。', async () => {

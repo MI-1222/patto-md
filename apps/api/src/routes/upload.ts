@@ -6,76 +6,14 @@ import {
   type UploadSignResponse,
   z,
 } from '@patto-md/shared';
-import { Hono, type MiddlewareHandler } from 'hono';
-import { extractBearerToken } from '../lib/auth.ts';
-import { isPat } from '../lib/pat.ts';
-import { resolvePatAuth } from '../middlewares/pat-auth.ts';
+import { Hono } from 'hono';
 import { createPresignedPutUrl, generateR2Key } from '../lib/r2.ts';
+import { createOptionalPatOrTurnstileMiddleware } from '../middlewares/pat-auth.ts';
 import { createRateLimitMiddleware } from '../middlewares/rate-limit.ts';
-import { createTurnstileMiddleware } from '../middlewares/turnstile.ts';
 import type { AppEnv } from '../types.ts';
 
 /** ファイルアップロード関連のサブルーター。 */
 export const uploadRouter = new Hono<AppEnv>();
-
-/**
- * アップロード署名要求に対する認可およびボット検証ミドルウェア。
- *
- * `Authorization` ヘッダーに正当な PAT(`documents:write` スコープ保有)が指定されている場合は、
- * CLI 等の外部連携とみなして Turnstile ボット検証をバイパスする。
- * トークン未指定時は、Web ブラウザからのアクセスとして Turnstile ボット検証を実行する。
- */
-const uploadAuthOrTurnstileMiddleware: MiddlewareHandler<AppEnv> = async (
-  c,
-  next,
-) => {
-  const authHeader = c.req.header('Authorization');
-  const token = extractBearerToken(authHeader);
-
-  if (token) {
-    if (!isPat(token)) {
-      return c.json(
-        {
-          error: {
-            message: '無効な認証トークン形式です。',
-          },
-        },
-        401,
-      );
-    }
-
-    const patUser = await resolvePatAuth(c);
-
-    if (!patUser) {
-      return c.json(
-        {
-          error: {
-            message: '無効または有効期限切れのPATトークンです。',
-          },
-        },
-        401,
-      );
-    }
-
-    if (!patUser.scopes.includes('documents:write')) {
-      return c.json(
-        {
-          error: {
-            message:
-              '操作に必要な権限(スコープ: documents:write)がありません。',
-          },
-        },
-        403,
-      );
-    }
-
-    c.set('patUser', patUser);
-    return next();
-  }
-
-  const turnstileMiddleware = createTurnstileMiddleware<AppEnv>();
-  return turnstileMiddleware(c, next);
-};
 
 /**
  * R2 直接アップロード用 Presigned PUT URL 発行エンドポイント。
@@ -91,7 +29,7 @@ uploadRouter.post(
     limit: RATE_LIMIT_UPLOAD_SIGN_LIMIT,
     windowSeconds: RATE_LIMIT_UPLOAD_SIGN_WINDOW_SECONDS,
   }),
-  uploadAuthOrTurnstileMiddleware,
+  createOptionalPatOrTurnstileMiddleware('documents:write'),
   async (c) => {
     let rawBody: unknown;
     try {
