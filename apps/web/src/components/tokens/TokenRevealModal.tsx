@@ -21,22 +21,27 @@ export const TokenRevealModal: React.FC<TokenRevealModalProps> = ({
   onClose,
 }) => {
   const [isCopied, setIsCopied] = useState<boolean>(false);
+  const [copyError, setCopyError] = useState<string | null>(null);
 
   /**
    * 平文トークンをクリップボードにコピーする。
    *
-   * クリップボード API が利用できない環境では、`input` 要素を選択状態にして手動コピーを促す。
+   * クリップボード API が利用できない環境では、`input` 要素を選択状態にして手動コピー案内を表示する。
    */
   const handleCopy = async () => {
     try {
       await navigator.clipboard.writeText(token.token);
       setIsCopied(true);
+      setCopyError(null);
       setTimeout(() => setIsCopied(false), 3000);
     } catch {
       const inputEl = document.getElementById(
         'revealed-token-input',
       ) as HTMLInputElement | null;
       inputEl?.select();
+      setCopyError(
+        'コピーに失敗しました。選択された文字列を手動でコピーしてください。',
+      );
     }
   };
 
@@ -121,6 +126,9 @@ export const TokenRevealModal: React.FC<TokenRevealModalProps> = ({
               )}
             </button>
           </div>
+          {copyError && (
+            <p className="mt-1 text-[11px] text-amber-400">{copyError}</p>
+          )}
         </div>
 
         <div className="mt-4 rounded-lg border border-neutral-800 bg-neutral-950/60 p-3 text-xs text-neutral-400">

@@ -118,7 +118,9 @@ describe('パーソナルアクセストークン(PAT)管理UIコンポーネン
           name: 'Hours Token',
           tokenMasked: 'pmd_pat_...2222',
           scopes: ['documents:read'],
-          expiresAt: new Date(Date.now() + 1000 * 60 * 60 * 3).toISOString(),
+          expiresAt: new Date(
+            Date.now() + 1000 * 60 * 60 * 3 + 1000 * 60 * 30,
+          ).toISOString(),
           lastUsedAt: null,
           createdAt: new Date().toISOString(),
         },
@@ -380,6 +382,33 @@ describe('パーソナルアクセストークン(PAT)管理UIコンポーネン
         closeButton?.click();
       });
       expect(onClose).toHaveBeenCalledTimes(1);
+    });
+
+    it('クリップボードコピー失敗時に手動コピーを促すエラー案内が表示される。', async () => {
+      Object.defineProperty(navigator, 'clipboard', {
+        value: {
+          writeText: vi.fn().mockRejectedValue(new Error('Permission denied')),
+        },
+        configurable: true,
+      });
+
+      await act(async () => {
+        root.render(
+          <TokenRevealModal token={mockCreatedToken} onClose={vi.fn()} />,
+        );
+      });
+
+      const copyButton = Array.from(container.querySelectorAll('button')).find(
+        (b) => b.textContent?.includes('コピー'),
+      );
+
+      await act(async () => {
+        copyButton?.click();
+      });
+
+      expect(container.textContent).toContain(
+        'コピーに失敗しました。選択された文字列を手動でコピーしてください。',
+      );
     });
   });
 
