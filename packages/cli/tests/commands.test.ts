@@ -551,5 +551,77 @@ describe('CLI コマンド実行テスト (commands/*.ts)', () => {
         ),
       );
     });
+    it('--title オプションが100文字を超えている場合にエラー終了すること。', async () => {
+      await writeConfigFile({ token: validToken }, tempConfigFile);
+      await fs.writeFile(markdownFile, '# 見出し\n\n本文。');
+
+      const errSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
+
+      const over100Title = 'a'.repeat(101);
+      await runPublish(markdownFile, {
+        title: over100Title,
+      });
+
+      expect(process.exitCode).toBe(1);
+      expect(errSpy).toHaveBeenCalledWith(
+        expect.stringContaining('タイトルは100文字以内で指定してください。'),
+      );
+    });
+
+    it('本文見出しが100文字を超えている場合に警告を出力して安全に100文字に切り詰めてコミットすること。', async () => {
+      await writeConfigFile({ token: validToken }, tempConfigFile);
+
+      const over100Heading = 'あ'.repeat(120);
+      await fs.writeFile(markdownFile, `# ${over100Heading}\n\n本文。`);
+
+      let committedPayload: Record<string, unknown> | undefined;
+      globalThis.fetch = vi
+        .fn()
+        .mockImplementation((url: string, init?: RequestInit) => {
+          if (url.includes('/api/upload/sign')) {
+            return Promise.resolve({
+              ok: true,
+              json: async () => ({
+                files: [
+                  {
+                    fileId: 'f-md',
+                    r2Key: 'exp-7d/content.md',
+                    uploadUrl: 'https://r2.example.com/put-md',
+                  },
+                ],
+              }),
+            });
+          }
+          if (init?.method === 'PUT') {
+            return Promise.resolve({ ok: true });
+          }
+          if (url.includes('/api/documents')) {
+            committedPayload = JSON.parse(String(init?.body || '{}'));
+            return Promise.resolve({
+              ok: true,
+              json: async () => ({
+                id: 'slugtrunc123',
+                url: '/p/slugtrunc123',
+                title: String(committedPayload?.title || ''),
+                createdAt: new Date().toISOString(),
+              }),
+            });
+          }
+          return Promise.resolve({ ok: false, status: 404 });
+        });
+
+      const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
+      vi.spyOn(console, 'log').mockImplementation(() => {});
+
+      await runPublish(markdownFile, { copy: false });
+
+      expect(process.exitCode).toBeUndefined();
+      expect(warnSpy).toHaveBeenCalledWith(
+        expect.stringContaining(
+          '警告: 本文見出しから抽出したタイトルが100文字を超えているため切り詰めます。',
+        ),
+      );
+      expect(committedPayload?.title).toBe('あ'.repeat(100));
+    });
   });
 });

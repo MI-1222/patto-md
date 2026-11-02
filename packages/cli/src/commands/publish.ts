@@ -2,6 +2,7 @@ import fs from 'node:fs/promises';
 import path from 'node:path';
 import {
   MAX_PASSCODE_LENGTH,
+  MAX_TITLE_LENGTH,
   MAX_TOTAL_FILE_SIZE,
   MIN_PASSCODE_LENGTH,
   type DocumentAttachmentCommit,
@@ -67,10 +68,24 @@ export async function runPublish(
     return;
   }
 
-  const title =
+  let title =
     options.title && options.title.trim().length > 0
       ? options.title.trim()
       : extractTitle(rawMarkdownContent, absoluteMarkdownPath);
+
+  if (title.length > MAX_TITLE_LENGTH) {
+    if (options.title) {
+      console.error(
+        `タイトルは${MAX_TITLE_LENGTH}文字以内で指定してください。(指定文字数: ${title.length})`,
+      );
+      process.exitCode = 1;
+      return;
+    }
+    console.warn(
+      `警告: 本文見出しから抽出したタイトルが${MAX_TITLE_LENGTH}文字を超えているため切り詰めます。`,
+    );
+    title = title.slice(0, MAX_TITLE_LENGTH);
+  }
 
   const expiration: ExpirationPreset = options.expiration || '7days';
 
