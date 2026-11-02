@@ -100,6 +100,8 @@ export const TokenRevealModal: React.FC<TokenRevealModalProps> = ({
               id="revealed-token-input"
               type="text"
               readOnly
+              autoComplete="off"
+              spellCheck={false}
               value={token.token}
               onClick={(e) => (e.target as HTMLInputElement).select()}
               className="w-full rounded-lg border border-neutral-700 bg-neutral-950 py-2.5 pr-28 pl-3 font-mono text-xs text-emerald-400 select-all focus:border-emerald-500 focus:outline-none"
