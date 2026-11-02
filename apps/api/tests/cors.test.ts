@@ -50,8 +50,8 @@ describe('CORS オリジン判定処理 (resolveAllowedOrigin)', () => {
     );
     // Workers フロントエンドドメイン。
     assert.strictEqual(
-      resolveAllowedOrigin('https://patto-md-web.mi-1222.workers.dev'),
-      'https://patto-md-web.mi-1222.workers.dev',
+      resolveAllowedOrigin('https://patto-md-web.example-user.workers.dev'),
+      'https://patto-md-web.example-user.workers.dev',
     );
   });
 

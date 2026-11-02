@@ -5,7 +5,9 @@
   "compatibility_date": "2025-09-01",
   "compatibility_flags": ["nodejs_compat"],
   "vars": {
-    "PUBLIC_API_URL": "https://patto-md-api.mi-1222.workers.dev",
+    // デプロイ環境のAPI URL。
+    // 未指定時はローカルデフォルト、またはCI/CDから注入される。
+    "PUBLIC_API_URL": "",
     "PUBLIC_TURNSTILE_SITE_KEY": "0x4AAAAAAFtzKVZTVyT1-Gnc"
   },
   "services": [

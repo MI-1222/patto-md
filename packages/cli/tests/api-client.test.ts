@@ -49,9 +49,11 @@ describe('CLI API クライアント (lib/api-client.ts)', () => {
 
       const resolvedProd = await resolveFrontendUrl(
         undefined,
-        'https://patto-md-api.mi-1222.workers.dev',
+        'https://patto-md-api.example-user.workers.dev',
       );
-      expect(resolvedProd).toBe('https://patto-md-web.mi-1222.workers.dev');
+      expect(resolvedProd).toBe(
+        'https://patto-md-web.example-user.workers.dev',
+      );
     });
   });
 

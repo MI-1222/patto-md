@@ -52,7 +52,7 @@ export async function resolveApiUrl(
  * 1. CLIコマンドライン引数 (`--frontend-url`)
  * 2. 環境変数 (`PATTO_FRONTEND_URL`)
  * 3. 設定ファイル (`frontendUrl`)
- * 4. API URLがローカルホストの場合は `http://localhost:4321`、それ以外は `https://patto-md-web.mi-1222.workers.dev`
+ * 4. API URLがローカルホストの場合は`http://localhost:4321`、`workers.dev`の場合はサブドメインから推測、それ以外はAPI URL
  *
  * @param cliFrontendUrl - コマンドライン引数から渡されたフロントエンドURL。
  * @param apiUrl - 解決済みのAPIベースURL。
@@ -84,7 +84,10 @@ export async function resolveFrontendUrl(
     return 'http://localhost:4321';
   }
 
-  return 'https://patto-md-web.mi-1222.workers.dev';
+  if (apiUrl.includes('.workers.dev')) {
+    return apiUrl.replace('patto-md-api.', 'patto-md-web.');
+  }
+  return apiUrl;
 }
 
 /** API通信エラーを表現するカスタムエラークラス。 */
