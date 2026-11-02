@@ -239,17 +239,25 @@ export async function commitDocument(
   return (await response.json()) as DocumentCommitResponse;
 }
 
+/** CLIで扱う認証済みユーザー詳細情報型。 */
+export interface CurrentUserInfo extends AuthUser {
+  /** PAT認可スコープ一覧(任意)。 */
+  scopes?: string[];
+  /** PATトークン名(任意)。 */
+  tokenName?: string;
+}
+
 /**
  * PATを用いてログイン中ユーザー情報を取得する (`GET /api/auth/me`)。
  *
  * @param pat - パーソナルアクセストークン。
  * @param apiUrl - APIベースURL。
- * @returns 認証成功時はユーザー情報、未認証・無効・接続失敗時は `null`。
+ * @returns 認証成功時はユーザー情報(スコープ・トークン名含む)、未認証・無効・接続失敗時は `null`。
  */
 export async function fetchCurrentUser(
   pat: string,
   apiUrl: string,
-): Promise<AuthUser | null> {
+): Promise<CurrentUserInfo | null> {
   const url = `${apiUrl}/api/auth/me`;
 
   try {
@@ -265,7 +273,15 @@ export async function fetchCurrentUser(
     }
 
     const data = (await response.json()) as AuthMeResponse;
-    return data.user ?? null;
+    if (!data.user) {
+      return null;
+    }
+
+    return {
+      ...data.user,
+      scopes: data.scopes,
+      tokenName: data.tokenName,
+    };
   } catch {
     return null;
   }

@@ -199,7 +199,11 @@ describe('CLI API クライアント (lib/api-client.ts)', () => {
 
       const fetchMock = vi.fn().mockResolvedValue({
         ok: true,
-        json: async () => ({ user: mockUser }),
+        json: async () => ({
+          user: mockUser,
+          scopes: ['documents:read', 'documents:write'],
+          tokenName: 'Test PAT',
+        }),
       });
       globalThis.fetch = fetchMock;
 
@@ -212,7 +216,11 @@ describe('CLI API クライアント (lib/api-client.ts)', () => {
         },
       });
 
-      expect(user).toEqual(mockUser);
+      expect(user).toEqual({
+        ...mockUser,
+        scopes: ['documents:read', 'documents:write'],
+        tokenName: 'Test PAT',
+      });
 
       const isConnected = await verifyPatConnectivity(mockPat, apiUrl);
       expect(isConnected).toBe(true);

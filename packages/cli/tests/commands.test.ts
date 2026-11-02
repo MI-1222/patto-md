@@ -123,6 +123,8 @@ describe('CLI コマンド実行テスト (commands/*.ts)', () => {
             providerUserId: '1',
             avatarUrl: null,
           },
+          scopes: ['documents:read', 'documents:write'],
+          tokenName: 'CLI Dev Token',
         }),
       });
       const logSpy = vi.spyOn(console, 'log').mockImplementation(() => {});
@@ -136,6 +138,10 @@ describe('CLI コマンド実行テスト (commands/*.ts)', () => {
       expect(logSpy).toHaveBeenCalledWith('ユーザー名: testuser');
       expect(logSpy).toHaveBeenCalledWith('認証プロバイダ: github');
       expect(logSpy).toHaveBeenCalledWith('プロバイダユーザーID: 1');
+      expect(logSpy).toHaveBeenCalledWith('トークン名: CLI Dev Token');
+      expect(logSpy).toHaveBeenCalledWith(
+        '認可スコープ: documents:read, documents:write',
+      );
     });
   });
 

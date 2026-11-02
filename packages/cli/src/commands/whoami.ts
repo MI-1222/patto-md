@@ -41,6 +41,12 @@ export async function runWhoami(
     console.log(`ユーザー名: ${user.username}`);
     console.log(`認証プロバイダ: ${user.provider}`);
     console.log(`プロバイダユーザーID: ${user.providerUserId}`);
+    if (user.tokenName) {
+      console.log(`トークン名: ${user.tokenName}`);
+    }
+    if (user.scopes && user.scopes.length > 0) {
+      console.log(`認可スコープ: ${user.scopes.join(', ')}`);
+    }
   } else {
     console.log('API認証状態: 照合失敗またはオフライン。');
   }

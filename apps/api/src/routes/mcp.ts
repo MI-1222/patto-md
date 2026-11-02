@@ -7,7 +7,7 @@
  *
  * 全リクエストに対してパーソナルアクセストークン(PAT)による認証を必須とし、
  * ドキュメントの新規公開(`publish_document`)、更新(`update_document`)、
- * および取得(`get_document`)の3つのツールを公開する。
+ * 取得(`get_document`)、および認証情報確認(`whoami`)の4つのツールを公開する。
  */
 
 import {
@@ -702,6 +702,33 @@ mcpRouter.post('/', async (c) => {
               '--- 本文開始 ---',
               markdownText,
               '--- 本文終了 ---',
+            ]
+              .filter(Boolean)
+              .join('\n'),
+          },
+        ],
+      };
+    },
+  );
+
+  server.registerTool(
+    'whoami',
+    {
+      description:
+        '現在設定されているPATトークンの所有者情報および認可スコープ一覧を取得します。',
+      inputSchema: {},
+    },
+    async () => {
+      const parsedUser = parseUserId(patUser.userId);
+      return {
+        content: [
+          {
+            type: 'text',
+            text: [
+              `ユーザーID: ${patUser.userId}`,
+              `トークン名: ${patUser.name}`,
+              parsedUser ? `認証プロバイダ: ${parsedUser.provider}` : null,
+              `認可スコープ: ${patUser.scopes.join(', ')}`,
             ]
               .filter(Boolean)
               .join('\n'),

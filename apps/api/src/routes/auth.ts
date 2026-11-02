@@ -92,12 +92,23 @@ function resolveFrontendOrigin(env: AppEnv['Bindings']): string {
  */
 authRouter.get('/me', authSessionMiddleware(), async (c) => {
   let user = c.get('user') ?? null;
-  if (!user) {
+  const hasAuthHeader = Boolean(c.req.header('Authorization'));
+  if (!user || hasAuthHeader) {
     await resolvePatAuth(c);
     user = c.get('user') ?? null;
   }
+  const patUser = c.get('patUser');
+
   c.header('Cache-Control', 'private, no-cache, no-store');
-  const responsePayload: AuthMeResponse = { user };
+  const responsePayload: AuthMeResponse = {
+    user,
+    ...(patUser
+      ? {
+          scopes: patUser.scopes,
+          tokenName: patUser.name,
+        }
+      : {}),
+  };
   return c.json(responsePayload, 200);
 });
 

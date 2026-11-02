@@ -1367,5 +1367,7 @@ describe('ドキュメント認可・API統合 (PAT とのハイブリッド連�
     assert.strictEqual(body.user?.provider, 'github');
     assert.strictEqual(body.user?.providerUserId, 'user-github-12345');
     assert.strictEqual(body.user?.username, 'GitHub PAT');
+    assert.deepStrictEqual(body.scopes, ['documents:read']);
+    assert.strictEqual(body.tokenName, 'GitHub PAT');
   });
 });

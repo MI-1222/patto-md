@@ -455,7 +455,7 @@ describe('MCP プロトコル・ハンドシェイクおよびツール一覧検
     assert.strictEqual(json.result.serverInfo.name, 'patto-md');
   });
 
-  test('`tools/list` リクエストで `publish_document`, `update_document`, `get_document` が返却されること。', async () => {
+  test('`tools/list` リクエストで `publish_document`, `update_document`, `get_document`, `whoami` が返却されること。', async () => {
     const res = await app.request('/api/mcp', {
       method: 'POST',
       headers: {
@@ -478,6 +478,38 @@ describe('MCP プロトコル・ハンドシェイクおよびツール一覧検
     assert.strictEqual(toolNames.includes('publish_document'), true);
     assert.strictEqual(toolNames.includes('update_document'), true);
     assert.strictEqual(toolNames.includes('get_document'), true);
+    assert.strictEqual(toolNames.includes('whoami'), true);
+  });
+
+  test('`whoami` ツールを呼び出してユーザーID、トークン名、認可スコープが返却されること。', async () => {
+    const res = await app.request('/api/mcp', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${TEST_VALID_PAT_ALL}`,
+      },
+      body: JSON.stringify({
+        jsonrpc: '2.0',
+        id: 3,
+        method: 'tools/call',
+        params: {
+          name: 'whoami',
+          arguments: {},
+        },
+      }),
+    });
+
+    assert.strictEqual(res.status, 200);
+    const json = (await res.json()) as {
+      result: { content: Array<{ type: string; text: string }>; isError?: boolean };
+    };
+
+    assert.strictEqual(json.result.isError, undefined);
+    const text = json.result.content[0].text;
+    assert.strictEqual(text.includes(USER_A_ID), true);
+    assert.strictEqual(text.includes('Cursor IDE'), true);
+    assert.strictEqual(text.includes('documents:read'), true);
+    assert.strictEqual(text.includes('documents:write'), true);
   });
 });
 
