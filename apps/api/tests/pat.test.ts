@@ -1257,4 +1257,71 @@ describe('ドキュメント認可・API統合 (PAT とのハイブリッド連�
     const body = (await res.json()) as DocumentListResponse;
     assert.strictEqual(Array.isArray(body.items), true);
   });
+
+  test('GET /api/documents/:id で PAT を付与して閲覧した場合、Cache-Control に private, no-cache, no-store および Vary に Authorization が設定されること。', async () => {
+    const plainToken = generatePat();
+    const hash = await hashPat(plainToken);
+
+    const doc: AuthenticatedDocument = {
+      id: dummySlug,
+      title: '公開ドキュメント',
+      description: null,
+      content_r2_key: 'exp-7d/content.md',
+      edit_token_hash: 'edithash',
+      modify_token_hash: 'modifyhash',
+      visibility: 'public',
+      status: 'published',
+      passcode_hash: null,
+      owner_user_id: 'user-github-12345',
+      owner_provider: 'github',
+      expires_at: new Date(Date.now() + 86400000).toISOString(),
+      created_at: new Date().toISOString(),
+      updated_at: new Date().toISOString(),
+    };
+
+    const mockDb = createMockD1Database(
+      [
+        {
+          id: 'pat-reader',
+          user_id: 'github:user-github-12345',
+          name: 'Reader PAT',
+          token_hash: hash,
+          scopes: JSON.stringify(['documents:read']),
+          expires_at: null,
+          last_used_at: null,
+          created_at: new Date().toISOString(),
+        },
+      ],
+      [doc],
+    );
+
+    const mockBucket = createMockR2Bucket();
+
+    const app = new Hono<AppEnv>();
+    app.use('*', async (c, next) => {
+      c.env = {
+        ...c.env,
+        DB: mockDb,
+        BUCKET: mockBucket as unknown as R2Bucket,
+      };
+      await next();
+    });
+    app.route('/api/documents', documentsRouter);
+
+    const res = await app.request(`/api/documents/${dummySlug}`, {
+      headers: {
+        Authorization: `Bearer ${plainToken}`,
+      },
+    });
+
+    assert.strictEqual(res.status, 200);
+    assert.strictEqual(
+      res.headers.get('Cache-Control'),
+      'private, no-cache, no-store',
+    );
+    assert.strictEqual(
+      res.headers.get('Vary'),
+      'Accept-Encoding, Authorization',
+    );
+  });
 });

@@ -726,10 +726,11 @@ documentsRouter.get('/:id', async (c) => {
     );
   }
 
+  const bearerToken = extractBearerToken(c.req.header('Authorization'));
+
   if (doc.visibility === 'protected') {
     let isAuthorized = false;
 
-    const bearerToken = extractBearerToken(c.req.header('Authorization'));
     if (bearerToken) {
       const [isEditMatched, isModifyMatched] = await Promise.all([
         verifyTokenHash(bearerToken, doc.edit_token_hash),
@@ -873,9 +874,11 @@ documentsRouter.get('/:id', async (c) => {
   }
 
   // 残存有効期間に基づくCache-Controlヘッダーの付与。
-  // パスコード保護ドキュメントの場合はエッジキャッシュ汚染防止のため常に private, no-store を強制する。
-  if (doc.visibility === 'protected') {
+  // パスコード保護ドキュメント、または認証ヘッダー(PAT / ケイパビリティトークン)が付与されているリクエストは、
+  // エッジキャッシュの混入・汚染を防止するため、常に private, no-cache, no-store を強制し、Vary ヘッダーを設定する。
+  if (doc.visibility === 'protected' || bearerToken) {
     c.header('Cache-Control', 'private, no-cache, no-store');
+    c.header('Vary', 'Accept-Encoding, Authorization');
   } else {
     const cacheControl = calculateDocumentCacheControl(doc.expires_at, now);
     c.header('Cache-Control', cacheControl);
