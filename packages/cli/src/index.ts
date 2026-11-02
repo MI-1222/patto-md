@@ -10,7 +10,7 @@ import type {
 } from './types.ts';
 
 /** CLIのバージョン番号。 */
-export const CLI_VERSION = '0.2.1';
+export const CLI_VERSION = '0.2.2';
 
 /**
  * patto-md CLI インスタンスを構築する。
